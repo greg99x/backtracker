@@ -42,7 +42,7 @@ conda-meta/
 *.drawio
 
 # .vs folder
-.vs
+.vs/
 
 # Drawing development folder
-.dev
+.dev/
