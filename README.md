@@ -1,0 +1,2 @@
+# backtester
+financial backtester library
