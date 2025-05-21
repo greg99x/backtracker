@@ -5,19 +5,36 @@ from core.event import OrderEvent
 from core.position import Position
 
 class Portfolio:
-    def __init__(self, initial_cash, cash_reserve, event_queue, symbols, logger=None):
+    def __init__(self, initial_cash, cash_reserve, event_queue, logger=None):
         self.logger = logger or logging.getLogger(__name__)
         self.cash = initial_cash
         self.cash_reserve = cash_reserve
         self.event_queue = event_queue
-        self.positions = {sym: Position(sym) for sym in symbols} # symbol -> Position instance
+        self.positions = {} #holder for instances of Position class
         self.current_prices = {}    # symbol -> latest price
-        self.history = []
+        self.history = [] #snapshots from portfolio
         self.trade_log = []
         self.total_invested_value = 0.0
-        self.timestamp = None # Last timestamp from event, handle with care!
+        self.timestamp = None # Last timestamp from event, not guaranteed to be up to date, handle with care!
         self.enable_snapshots = True
         self.enable_trade_log = True
+        self.cumulated_slippage = 0.0
+        self.cumulated_commission = 0.0
+
+    def create_new_position(self, symbol):
+        '''
+        Method creates new empty position for a given symbol
+        Should be called before any Event is processed, otherwise the methods in core modules will not take action.
+        Param: symbol
+        Return: True if new position is created
+                False if position already exists
+        '''
+        if not self._position_has_keys(symbol):
+            self.positions[symbol] = Position(symbol)
+            return True
+        else:
+            self.logger.warning(f'Position for {symbol} already exists')
+            return False
 
     def update_market(self, event):
         """
@@ -27,7 +44,7 @@ class Portfolio:
         Parameters:
         - event: MarketEvent instance containing price and symbol info.
         """
-        if event.type != 'MARKET' or event.symbol not in self.positions.keys():
+        if event.type != 'MARKET' or not self._position_has_keys(event.symbol):
             return
             
         symbol = event.symbol
@@ -55,6 +72,29 @@ class Portfolio:
             if sym in self.current_prices
         )
 
+    def _update_cumulated_slippage(self,event):
+        if not event.type == 'FILL':
+            self.logger.debug('_update_cumulated_slippage received event with not type FILL')
+            return
+        self.cumulated_slippage += event.slippage
+
+    def _update_cumulated_commission(self,event):
+        if not event.type == 'FILL':
+            self.logger.debug('_update_cumulated_slippage received event with not type FILL')
+            return
+        self.cumulated_commission += event.commission
+    
+    def _deduct_fee_from_cash(self,amount):
+        if amount < 0:
+            self.logger.debug('Fee amount can not be less then zero.')
+            return
+        self.cash -= amount
+        if self.cash < 0:
+            self.logger.debug('Cash is negative after fee deduction')
+
+    def _position_has_keys(self, symbol):
+        return symbol in self.positions
+    
     def _record_snapshot(self):
         """
         Save a snapshot of the portfolio at a point in time.
@@ -86,7 +126,7 @@ class Portfolio:
             'price': fill_event.fill_price,
             'currency': fill_event.currency,
             'side': fill_event.direction,
-            'fee': fill_event.fee,
+            'commission': fill_event.commission,
             'slippage': fill_event.slippage,
             'order_id': fill_event.order_id
         }
@@ -100,7 +140,7 @@ class Portfolio:
         Generates OrderEvent and puts it in the event_queue      
         """
         # return OrderEvent or None
-        if event.type != 'SIGNAL' or event.symbol not in self.positions.keys():
+        if event.type != 'SIGNAL' or not self._position_has_keys(event.symbol):
             return
         
         # check if trade should be executed
@@ -133,7 +173,7 @@ class Portfolio:
             if not current_price or current_price <= 0:
                 self.logger.debug(f'Price for ticker {event.symbol} is invalid')
                 return None
-            return free_cash/self.current_prices
+            return free_cash/current_price
         
         elif event.signal_type == 'SELL':
             return pos.quantity
@@ -142,20 +182,33 @@ class Portfolio:
             return None
 
     def update_fill(self, fill_event):
-        """Apply a fill: update positions, cash, realized PnL."""
-        # adjust position qty and cost basis
-        # update cash and log trade
+        """
+        Apply a fill: update positions, cash, cumulated commission and slippage, 
+        """
         self.timestamp = fill_event.timestamp
         symbol = fill_event.symbol
-        quantity = fill_event.quantity
-        direction = fill_event.direction  # 'BUY' or 'SELL'
-        fill_price = fill_event.fill_price
-        commission = fill_event.commission
-        slippage = fill_event.slippage
+        
+        # Check if position exists
+        if not self._position_has_keys(symbol):
+            self.logger.debug(f'Order filled for non existing position: {symbol}')
+            return None
+        
+        # Let the position proccess the fill event
+        fill_ok = self.positions[symbol].update_fill(fill_event)
+        if fill_ok:
+            self._deduct_fee_from_cash(fill_event.commission)
+            self._deduct_fee_from_cash(fill_event.slippage)
+            self._update_total_market_value()
+            self._update_cumulated_commission(fill_event)
+            self._update_cumulated_slippage(fill_event)
+            
+            if self.enable_snapshots:
+                self._record_snapshot()
 
-    def final_report(self):
-        """Compute final metrics, print or return results."""
-        # e.g. CAGR, Sharpe, max drawdown
+            if self.enable_trade_log:
+                self._update_trade_log(fill_event)
+
+
 
 
 
