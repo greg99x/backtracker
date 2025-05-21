@@ -107,7 +107,11 @@ class Portfolio:
         }
 
         for sym, pos in self.positions.items():
-            price = self.current_prices[sym]
+            if sym in self.current_prices:
+                price = self.current_prices[sym]
+            else:
+                self.logger.info('Current price does not exist for snapshot yet')
+                price = 0.0
             snapshot['positions'][sym] = {
                 'quantity': pos.quantity,
                 'avg_price': pos.avg_price,

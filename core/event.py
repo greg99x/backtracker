@@ -5,7 +5,7 @@ import logging
 from abc import ABC, abstractmethod
 
 class Event(ABC):
-    def __init__(self,type):
+    def __init__(self):
         self.type = 'GENERIC'
 
     @abstractmethod
@@ -39,7 +39,7 @@ class SignalEvent(Event):
 
 
 class OrderEvent(Event):
-    def __init__(self, timestamp, symbol, order_type, quantity, direction, order_id):
+    def __init__(self, timestamp, symbol, order_type, quantity, direction):
         super().__init__()
         self.type = 'ORDER'
         self.timestamp = timestamp
@@ -47,7 +47,6 @@ class OrderEvent(Event):
         self.order_type = order_type  # 'MARKET', 'LIMIT', etc.
         self.quantity = quantity
         self.direction = direction    # 'BUY' or 'SELL'
-        self.order_id = order_id
 
     def __str__(self):
         return (f"OrderEvent({self.timestamp}, {self.symbol}, "

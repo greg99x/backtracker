@@ -59,7 +59,7 @@ class TestPosition(unittest.TestCase):
         self.assertEqual(self.pos.quantity, 5)  # Should remain unchanged
 
     def test_zero_quantity_fill(self):
-        result = self.pos.update_fill(self.create_fill_event('BUY', 0, 100))
+        self.pos.update_fill(self.create_fill_event('BUY', 0, 100))
         self.assertEqual(self.pos.quantity, 0)
 
     def test_invalid_direction(self):
