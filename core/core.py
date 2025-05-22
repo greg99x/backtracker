@@ -65,8 +65,12 @@ class BacktestEngine:
 
 
         def _handle_market_event(self, event):
+            # Strategy should look at market event and either create or not create a signal
             self.strategy.on_market_event(event)
+            # Portfolio should update current account finances
             self.portfolio.update_market(event)
+            # Broker should handle pending orders
+            self.broker.handle_event(event,self.current_time)
 
         def _handle_signal_event(self, event):
             order = self.portfolio.generate_order(event)
@@ -74,9 +78,7 @@ class BacktestEngine:
                 self.event_queue.put(order)
 
         def _handle_order_event(self, event):
-            fill = self.broker.execute_order(event)
-            if fill:
-                self.event_queue.put(fill)
+            self.broker.handle_event(event,self.current_time)
 
         def _handle_fill_event(self, event):
             self.portfolio.update_fill(event)
