@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 import logging
 
 class BacktestEngine:
-    def __init__(self, data_handler, strategy, broker, portfolio, logger=None):
-        self.event_queue = EventQueue()
+    def __init__(self, event_queue, data_handler, strategy, broker, portfolio, logger=None):
+        self.event_queue = event_queue
         self.data_handler = data_handler(event_queue=self.event_queue)
         self.strategy = strategy(event_queue=self.event_queue)
         self.broker = broker(event_queue=self.event_queue)

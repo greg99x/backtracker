@@ -118,6 +118,20 @@ class DataStore:
                 self.logger.debug(f"Failed to update data for {symbol}: {e}")
                 return False
 
+    def _check_OHLCV_format(self,symbol) -> bool:
+        if symbol not in self.data:
+            self.logger.info(f'_check_OHLCV_format: Symbol {symbol} not in DataStore data.') 
+            return False
+        
+        required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+        data = self.data[symbol]
+
+        if data.empty:
+            self.logger.info(f'_check_OHLCV_format: Data for {symbol} is empty.')
+            return False
+        
+        return required_columns.issubset(data.column)
+
 '''
 if __name__ == '__main__':
     logger = logging.getLogger('logger')
