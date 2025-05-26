@@ -10,6 +10,17 @@ class DataStore:
         self.logger = logger or logging.getLogger(__name__)
         self.data = {}  # Contains current full data. key: symbol
         self.yfinance_objects = {}  # Contains instances of yf.Ticker
+        self.data_for_market_event = pd.DataFrame(columns=[
+            'Symbol',
+            'Date',
+            'Open',
+            'High',
+            'Low',
+            'Close',
+            'Volume',
+            'MarketEvent' #Flag for whether marketevent has been already called
+        ])
+        self.data_for_market_event = self.data_for_market_event.set_index('Date')
 
     def read_csv(self, symbol, filename) -> bool:
         '''
@@ -20,7 +31,8 @@ class DataStore:
                 self.logger.info(f"File '{filename}' does not exist.")
                 return False
             
-            df = pd.read_csv(filename, index_col=0, parse_dates=True)
+            df = pd.read_csv(filename, parse_dates=True)
+            df = df.set_index('Date')
             self.data[symbol] = df
             self.logger.info(f'Read data with shape: {df.shape}')
             self.logger.info(f'Reader: Last date in date: {df.index.max()}')
@@ -123,14 +135,87 @@ class DataStore:
             self.logger.info(f'_check_OHLCV_format: Symbol {symbol} not in DataStore data.') 
             return False
         
-        required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+        required_columns = {'Open', 'High', 'Low', 'Close', 'Volume'}
         data = self.data[symbol]
+
+        if data.index.name != 'Date':
+            self.logger.warning(f'Index for {symbol} is not Date')
+            return False
+        
+        # Ensure index is datetime
+        if not pd.api.types.is_datetime64_any_dtype(data.index):
+            self.logger.warning(f"Index for {symbol} data is not datetime.")
+            return False
 
         if data.empty:
             self.logger.info(f'_check_OHLCV_format: Data for {symbol} is empty.')
             return False
         
-        return required_columns.issubset(data.column)
+        return required_columns.issubset(data.columns)
+    
+    def get_price(self, symbol, current_time):
+        """
+        Returns the latest available price data (row) before or equal to current_time
+        from self.data[symbol], or None if no valid data.
+        Currently returns the close price when called. Might need enhancement
+        """
+        if symbol not in self.data:
+            self.logger.warning(f"No data available for symbol: {symbol}")
+            return None
+
+        if self._check_OHLCV_format(symbol):
+            return None
+
+        df = self.data[symbol]
+
+        # Filter all timestamps <= current_time
+        valid_times = df.index[df.index <= pd.to_datetime(current_time)]
+        if valid_times.empty:
+            self.logger.info(f"No data before {current_time} for {symbol}.")
+            return None
+
+        # Get latest row before or at current_time
+        closest_time = valid_times.max()
+
+        #Check if line is OHLCV or just a single line
+        line = df.loc[closest_time]
+        return df.loc[closest_time]['Close']
+
+    def create_data_for_eventqueue(self):
+        self.logger.debug(f"Symbols in data: {list(self.data.keys())}")
+        for symbol, data in self.data.items():
+            # Only proceed if data format is correct (invert your logic)
+            if not self._check_OHLCV_format(symbol):
+                self.logger.warning(f"Data format check failed for symbol {symbol}")
+                continue  # skip this symbol
+            else:
+                self.logger.info('Data format checking passed')
+            
+            columns_to_copy = ['Open','High','Low','Close','Volume']
+            copy_data = data.copy(columns_to_copy)
+            
+            # Add required columns for data_for_market_event
+            copy_data['Symbol'] = symbol
+            copy_data['MarketEvent'] = 0.0
+            
+            # Make sure index name is 'Date' for consistency
+            if copy_data.index.name != 'Date':
+                copy_data = copy_data.set_index('Date')
+            
+            # Append to existing DataFrame
+            if self.data_for_market_event.empty and not copy_data.empty :
+                self.data_for_market_event = copy_data
+            else:
+                self.data_for_market_event = pd.concat([self.data_for_market_event, copy_data])
+        
+        # Sort by index (Date) ascending
+        self.data_for_market_event = self.data_for_market_event.sort_index()
+
+
+
+
+
+
 
 '''
 if __name__ == '__main__':

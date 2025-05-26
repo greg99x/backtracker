@@ -30,7 +30,7 @@ class Portfolio:
                 False if position already exists
         '''
         if not self._position_has_keys(symbol):
-            self.positions[symbol] = Position(symbol)
+            self.positions[symbol] = Position(symbol,logger=self.logger)
             return True
         else:
             self.logger.warning(f'Position for {symbol} already exists')

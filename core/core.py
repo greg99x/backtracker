@@ -7,10 +7,10 @@ import logging
 class BacktestEngine:
     def __init__(self, event_queue, data_handler, strategy, broker, portfolio, logger=None):
         self.event_queue = event_queue
-        self.data_handler = data_handler(event_queue=self.event_queue)
-        self.strategy = strategy(event_queue=self.event_queue)
-        self.broker = broker(event_queue=self.event_queue)
-        self.portfolio = portfolio(event_queue=self.event_queue)
+        self.data_handler = data_handler
+        self.strategy = strategy
+        self.broker = broker
+        self.portfolio = portfolio
         self.logger = logger or logging.getLogger(__name__)
         self.on_step = None
         self.current_time = None
@@ -28,7 +28,7 @@ class BacktestEngine:
         Handles all event types and updates strategy, portfolio, and broker accordingly.
         """
         self.logger.info("Starting backtest...")
-        self.start_time = datetime.utcnow()
+        self.start_time = datetime.now(timezone.utc)
 
         try:
             while self.data_handler.has_next():
@@ -64,24 +64,24 @@ class BacktestEngine:
             self.output_results()
 
 
-        def _handle_market_event(self, event):
-            # Strategy should look at market event and either create or not create a signal
-            self.strategy.on_market_event(event)
-            # Portfolio should update current account finances
-            self.portfolio.update_market(event)
-            # Broker should handle pending orders
-            self.broker.handle_event(event,self.current_time)
+    def _handle_market_event(self, event):
+        # Strategy should look at market event and either create or not create a signal
+        self.strategy.on_market_event(event)
+        # Portfolio should update current account finances
+        self.portfolio.update_market(event)
+        # Broker should handle pending orders
+        self.broker.handle_event(event,self.current_time)
 
-        def _handle_signal_event(self, event):
-            order = self.portfolio.generate_order(event)
-            if order:
-                self.event_queue.put(order)
+    def _handle_signal_event(self, event):
+        order = self.portfolio.generate_order(event)
+        if order:
+            self.event_queue.put(order)
 
-        def _handle_order_event(self, event):
-            self.broker.handle_event(event,self.current_time)
+    def _handle_order_event(self, event):
+        self.broker.handle_event(event,self.current_time)
 
-        def _handle_fill_event(self, event):
-            self.portfolio.update_fill(event)
+    def _handle_fill_event(self, event):
+        self.portfolio.update_fill(event)
 
 
 

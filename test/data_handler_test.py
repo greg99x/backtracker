@@ -5,6 +5,8 @@ from datetime import datetime
 import os
 import sys
 import logging
+from copy import deepcopy
+
 
 # --- Add parent directory to path for importing DataStore ---
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -20,7 +22,7 @@ if logger.hasHandlers():
 
 # Create and configure new stream handler to stdout
 stream_handler = logging.StreamHandler(sys.stdout)
-stream_handler.setLevel(logging.DEBUG)
+stream_handler.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
@@ -75,6 +77,64 @@ class TestDataStore(unittest.TestCase):
         self.assertEqual(len(updated), 3)
         self.assertIn(pd.to_datetime('2024-01-03'), updated.index)
         logger.debug("Test update_data_till_date passed.")
+    
+    def test_create_data_for_eventqueue(self):
+
+        # Prepare sample data with proper OHLCV columns and datetime index
+        dates = pd.to_datetime(['2023-01-01', '2023-01-03', '2023-01-02'])
+        data = pd.DataFrame({
+            'Date': dates,
+            'Open': [100, 110, 105],
+            'High': [105, 115, 110],
+            'Low': [95, 105, 100],
+            'Close': [102, 112, 108],
+            'Volume': [1000, 1100, 1050]
+        })
+
+        data = data.set_index('Date')
+        
+        # Put this data into self.ds.data for a symbol
+        self.ds.data['AAPL'] = data
+        
+        # Ensure data_for_market_event starts empty
+        self.ds.data_for_market_event = pd.DataFrame(columns=[
+            'Symbol', 'Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'MarketEvent'
+        ])
+        self.ds.data_for_market_event = self.ds.data_for_market_event.set_index('Date')
+        # Make deep copy of data before calling
+        data_before = deepcopy(self.ds.data)
+        
+        # Call the method
+        self.ds.create_data_for_eventqueue()
+        
+        # Check self.data was not modified
+        for symbol in data_before:
+            pd.testing.assert_frame_equal(self.ds.data[symbol], data_before[symbol])
+        
+        # Check data_for_market_event is not empty
+        self.assertFalse(self.ds.data_for_market_event.empty)
+        
+        # Check columns exist and have correct dtype
+        df = self.ds.data_for_market_event
+        for col in ['Symbol', 'Open', 'High', 'Low', 'Close', 'Volume', 'MarketEvent']:
+            self.assertIn(col, df.columns)
+        
+        # Check index is datetime
+        self.assertTrue(pd.api.types.is_datetime64_any_dtype(df.index))
+        
+        # Check 'MarketEvent' column is int (or at least numeric)
+        self.assertTrue(pd.api.types.is_numeric_dtype(df['MarketEvent']))
+        
+        # Check all rows have Symbol = 'AAPL'
+        self.assertTrue((df['Symbol'] == 'AAPL').all())
+        
+        # Check index is sorted ascending
+        self.assertTrue(df.index.is_monotonic_increasing)
+        
+        # Check the dates in index match those of original data
+        original_dates = sorted(self.ds.data['AAPL'].index)
+        new_dates = sorted(df.index.unique())
+        self.assertEqual(original_dates, new_dates)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
