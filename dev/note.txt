@@ -1,0 +1,8 @@
+2025.05.26
+-Created data_for_market_event in DataStore class. This will be used to fetch data by core with the get_market_event method.
+	-It can be decided if data should be consumed (eg. deleted from the frame) after market event creation, or it just should be flagged.
+-Need to write helper method to sort data_for_market_event by chronological order
+-Need to write method, that takes data in self.data and creates a concated DataFrame in data_for_market_event 
+
+
+-Create_data_for_eventqueue: Manually selects only the needed data from self.data, so this is a choke point for passing data to the MarketEvent later. Needs revision after completion

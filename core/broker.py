@@ -8,7 +8,7 @@ import logging
 class Broker:
     def __init__(self, event_queue, price_source, market_calendar, commission_perc=0.001, slippage_perc=0.0005, logger=None):
         """
-        Simulated broker to execute orders.
+        Simulated broker to ecute orders.
 
         :param event_queue: Queue to send FillEvents back to
         :param price_source: Object with a `get__price(symbol,time)` method

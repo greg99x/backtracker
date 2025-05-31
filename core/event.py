@@ -14,13 +14,17 @@ class Event(ABC):
 
 
 class MarketEvent(Event):
-    def __init__(self, timestamp, symbol, price, volume=None):
+    def __init__(self, timestamp, symbol, open, high=None, low=None, close=None, volume=None):
         super().__init__()
         self.type = 'MARKET'
         self.timestamp = timestamp
         self.symbol = symbol
-        self.price = price
-        self.volume = volume  # Optional for tick data or candles
+        self.price = open
+        self.open = open
+        self.high = high
+        self.low = low
+        self.close = close
+        self.volume = volume
 
     def __str__(self):
         return f"MarketEvent({self.timestamp}, {self.symbol}, {self.price})"

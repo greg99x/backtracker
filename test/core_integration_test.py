@@ -5,10 +5,12 @@ from datetime import datetime
 import os
 import sys
 import logging
+import yfinance as yf
+from time import time
 
 # --- Add parent directory to path for importing DataStore ---
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from core.data_handler import DataStore
+from core.data_handler2 import DataHandler
 from core.core import BacktestEngine
 from core.broker import Broker
 from core.portfolio import Portfolio
@@ -18,7 +20,7 @@ from core.core import EventQueue
 
 # --- Logger Setup ---
 logger = logging.getLogger('logger')
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 # Clear any existing handlers
 if logger.hasHandlers():
@@ -50,7 +52,7 @@ class TestCore(unittest.TestCase):
 
         self.portfolio = Portfolio(initial_cash=11000.0,cash_reserve=1000.0,event_queue=self.event_queue,logger=logger)
 
-        self.datahandler = DataStore(logger=logger)
+        self.datahandler = DataHandler(self.event_queue,logger=logger)
 
         self.broker = Broker(event_queue=self.event_queue,
                              price_source=self.datahandler,
@@ -66,24 +68,40 @@ class TestCore(unittest.TestCase):
                                      portfolio=self.portfolio,
                                      logger=logger)
 
-
+    
     def test_data_handler_setupflow(self):
         #Check logger works.
         self.datahandler.logger.info('DataHandler logger works.')
         
         #Check frames shapes at initiation
+        self.assertFalse(self.datahandler.datastore.data)
+        logger.info(f'Data: {self.datahandler.datastore.data}')
+
+        self.datahandler.read_csv('BTC-USD',r'C:\backtester\dev\test.csv')
+
+        # Test that after reading CSV that data_for_market_event is not modified
+        # Test that data is read in self.data
+        self.assertIn('BTC-USD',self.datahandler.datastore.data)
+        self.assertGreater(self.datahandler.datastore.data['BTC-USD'].shape[0],0)
+        self.assertEqual(self.datahandler.datastore.data['BTC-USD'].shape[1],8)
+
+        #Test that wrote CSV is shame shape as self.data
+        self.datahandler.write_csv('BTC-USD','test.csv')
+        reread_data = pd.read_csv('test.csv',index_col=1)
+        self.assertEqual(self.datahandler.datastore.data['BTC-USD'].shape,reread_data.shape)
+        #os.remove('test.csv')
+        self.datahandler.logger.info('test_data_handler_setupflow end')
+
+
+        #Only works if VPN is disabled
+        """
+        self.datahandler._clear_data()
         self.assertFalse(self.datahandler.data)
-        self.assertEqual(self.datahandler.data_for_market_event.shape,(0,7))
+        self.datahandler._get_data_from_yf('AAPL',datetime(2024,12,1),datetime(2025,2,1),interval='1d')
+        logger.info(self.datahandler.data)
+        logger.info(self.datahandler.yfinance_objects)
+        """
 
-        logger.info(f'Data_for_market_event:{self.datahandler.data_for_market_event}')
-        logger.info(f'Data_for_market_event shape:{self.datahandler.data_for_market_event.shape}')
-        logger.info(f'Data: {self.datahandler.data}')
-
-        self.datahandler.read_csv('BTC-USD',r'C:\backtester\dev\btcusd.csv')
-
-        logger.info(f'Data_for_market_event:{self.datahandler.data_for_market_event}')
-        logger.info(f'Data_for_market_event shape:{self.datahandler.data_for_market_event.shape}')
-        logger.info(f'Data: {self.datahandler.data}')
 
         
 if __name__ == '__main__':

@@ -4,12 +4,31 @@ import yfinance as yf
 import os
 from datetime import datetime, timedelta
 import logging
+from core.event import MarketEvent
+from time import time
 
 class DataStore:
     def __init__(self, logger=None):
         self.logger = logger or logging.getLogger(__name__)
         self.data = {}  # Contains current full data. key: symbol
         self.yfinance_objects = {}  # Contains instances of yf.Ticker
+        self.data_for_market_event = pd.DataFrame(columns=[
+            'Symbol',
+            'Date',
+            'Open',
+            'High',
+            'Low',
+            'Close',
+            'Volume',
+            'MarketEvent' #Flag for whether marketevent has been already called
+        ])
+        self.data_for_market_event = self.data_for_market_event.set_index('Date')
+
+
+    def _clear_data(self):
+        self.data={}
+
+    def _clear_data_for_market_event(self):
         self.data_for_market_event = pd.DataFrame(columns=[
             'Symbol',
             'Date',
@@ -31,7 +50,7 @@ class DataStore:
                 self.logger.info(f"File '{filename}' does not exist.")
                 return False
             
-            df = pd.read_csv(filename, parse_dates=True)
+            df = pd.read_csv(filename, parse_dates=['Date'])
             df = df.set_index('Date')
             self.data[symbol] = df
             self.logger.info(f'Read data with shape: {df.shape}')
@@ -62,7 +81,28 @@ class DataStore:
         For now, only tested to work on time interval '1d'
         '''
         if symbol not in self.yfinance_objects:
-            self.yfinance_objects[symbol] = yf.Ticker(symbol)
+            try:
+                self.yfinance_objects[symbol] = yf.Ticker(symbol)
+                self.logger.info(f'Ticker created: {symbol}')
+            except Exception as e:
+                self.logger.error(f"Creating yfinance.Ticker failed: {e}")
+                raise
+
+        self.logger.info(start_date)
+        self.logger.info(type(start_date))
+
+        if isinstance(start_date,datetime):
+            try:
+                start_date = start_date.strftime("%Y-%m-%d")
+            except Exception as e:
+                self.logger.debug(f'Could not translate {start_date} to string')
+        self.logger.info(start_date)
+        self.logger.info(type(start_date))
+        if isinstance(end_date,datetime):
+            try:
+                end_date = end_date.strftime("%Y-%m-%d")
+            except Exception as e:
+                self.logger.debug(f'Could not translate {end_date} to string')
 
         try:
             if not start_date and not end_date:
@@ -191,6 +231,7 @@ class DataStore:
             else:
                 self.logger.info('Data format checking passed')
             
+            #Important limitation!!!! Later need to be revised if more info is needed
             columns_to_copy = ['Open','High','Low','Close','Volume']
             copy_data = data.copy(columns_to_copy)
             
@@ -210,6 +251,37 @@ class DataStore:
         
         # Sort by index (Date) ascending
         self.data_for_market_event = self.data_for_market_event.sort_index()
+
+    def has_next(self) -> bool:
+        # Method for core engine to see if there is still unprocessed data that should go to market events.
+        # Return false if data was not loaded.
+        if self.data_for_market_event.empty:
+            self.logger.debug('has_next: data_for_market_event is empty.')
+            return False
+        
+        return self.data_for_market_event.iloc[-1]['MarketEvent'] == 0
+    
+    def get_next_event(self):
+        time1 = time()
+        next_item = self.data_for_market_event[self.data_for_market_event['MarketEvent'] == 0].iloc[0]
+        # Create market event
+        time2 = time()
+        event = MarketEvent(
+        timestamp = next_item.name,
+        symbol = next_item['Symbol'],
+        open = next_item['Open'],
+        high = next_item['High'],
+        low = next_item['Low'],
+        close = next_item ['Close'],
+        volume = next_item['Volume'])
+        time3 = time()
+        # Set flag in data_for_market_event that event was already created.
+        index = self.data_for_market_event[self.data_for_market_event['MarketEvent']==0].index[0]
+        self.data_for_market_event.loc[index,'MarketEvent'] = 1
+        time4 = time()
+        return [event, time2-time1, time3-time2, time4-time3]
+
+
 
 
 
