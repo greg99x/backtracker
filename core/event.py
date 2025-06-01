@@ -70,5 +70,12 @@ class FillEvent(Event):
         self.slippage = slippage # should be positive, and added to total cost
 
     def __str__(self):
-        return (f"FillEvent({self.timestamp}, {self.symbol}, {self.quantity}, "
-                f"{self.direction}, {self.fill_price}, commission={self.commission})")
+        total_price = self.quantity * self.fill_price
+        total_cost = total_price + self.commission + self.slippage
+        return (
+            f"FillEvent({self.timestamp}, {self.symbol}, Quantity: {self.quantity}, "
+            f"Direction: {self.direction}, Price: {self.fill_price}, "
+            f"Commission: {self.commission}, Slippage: {self.slippage}, "
+            f"Total Price: {total_price:.2f}, Total Cost: {total_cost:.2f})"
+        )
+

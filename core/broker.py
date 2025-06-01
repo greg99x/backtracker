@@ -85,13 +85,13 @@ class Broker:
         # Get current market price
         price = self.price_source.get_price(symbol, current_time)
 
-        if price is None or type(price) != float:
-            self.logger.debug(f"No price, or invalid price found for symbol: {symbol} {price} {type(price)}")
+        if price is None:
+            self.logger.debug(f"No price found for symbol: {symbol} {price} {type(price)}")
             return None
 
         # Apply slippage
         # For now, slippage is not included in the fill_price but treated as a separate fee
-        slippage = self.slippage_perc * price
+        slippage = self.slippage_perc * quantity * price
         fill_price = price # + slippage if direction == 'BUY' else price - slippage
 
         # Commission

@@ -20,7 +20,7 @@ from core.core import EventQueue
 
 # --- Logger Setup ---
 logger = logging.getLogger('logger')
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 # Clear any existing handlers
 if logger.hasHandlers():
@@ -32,9 +32,7 @@ stream_handler.setLevel(logging.DEBUG)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
-logger.propagate = True  # Don't bubble up to root logger
-
-logger.debug("Logger configured and ready.")
+logger.propagate = False  # Don't bubble up to root logger
 
 class TestCore(unittest.TestCase):
 

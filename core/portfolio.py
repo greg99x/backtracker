@@ -122,20 +122,11 @@ class Portfolio:
         self.history.append(snapshot)
 
     def _update_trade_log(self, fill_event):
+        self.trade_log.append(str(fill_event))
 
-        trade = {
-            'timestamp': fill_event.timestamp,
-            'symbol': fill_event.symbol,
-            'quantity': fill_event.quantity,
-            'price': fill_event.fill_price,
-            'currency': fill_event.currency,
-            'side': fill_event.direction,
-            'commission': fill_event.commission,
-            'slippage': fill_event.slippage,
-            'order_id': fill_event.order_id
-        }
-        self.trade_log.append(trade)
-
+    def _resize_cash_reserve(self):
+        self.cash_reserve = self.cash * 0.02
+    
     def generate_order(self, event):
         """
         Translate a signal into a sized order.
@@ -143,6 +134,9 @@ class Portfolio:
         - event: SignalEvent instance containing price and symbol info.
         Generates OrderEvent and puts it in the event_queue      
         """
+        #If portfolio has a sudden growth, recalculate the cash reserve so trading stays possible
+        self._resize_cash_reserve()
+
         # return OrderEvent or None
         if event.type != 'SIGNAL' or not self._position_has_keys(event.symbol):
             return
@@ -183,6 +177,12 @@ class Portfolio:
             self.logger.info(f'Currently not implemented signal type {event.signal_type}')
             return None
 
+    def _deduct_order_value_from_cash(self,price,quantity,direction):
+        if direction == 'BUY':
+            self.cash -= price*quantity
+        elif direction == 'SELL':
+            self.cash += price*quantity
+
     def update_fill(self, fill_event):
         """
         Apply a fill: update positions, cash, cumulated commission and slippage, 
@@ -198,6 +198,7 @@ class Portfolio:
         # Let the position proccess the fill event
         fill_ok = self.positions[symbol].update_fill(fill_event)
         if fill_ok:
+            self._deduct_order_value_from_cash(fill_event.fill_price, fill_event.quantity, fill_event.direction)
             self._deduct_fee_from_cash(fill_event.commission)
             self._deduct_fee_from_cash(fill_event.slippage)
             self._update_total_market_value()
