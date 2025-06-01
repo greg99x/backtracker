@@ -55,7 +55,7 @@ class Portfolio:
         self.current_prices[symbol] = price
 
         # Update position based on new event
-        self.positions[symbol].update_position(event)
+        #self.positions[symbol].update_position(event)
 
         # Update total market value
         self._update_total_market_value()
@@ -114,7 +114,7 @@ class Portfolio:
                 price = 0.0
             snapshot['positions'][sym] = {
                 'quantity': pos.quantity,
-                'avg_price': pos.avg_price,
+                'avg_price': pos.avg_cost,
                 'market_value': pos.market_value(price),
                 'unrealized PnL': pos.unrealized_pnl(price)
             }
@@ -146,7 +146,7 @@ class Portfolio:
         # return OrderEvent or None
         if event.type != 'SIGNAL' or not self._position_has_keys(event.symbol):
             return
-        
+
         # check if trade should be executed
         quantity = self._decide_order_sizing(event)
         if not quantity:
@@ -157,11 +157,9 @@ class Portfolio:
         order_type = 'MARKET' # Expand on this later with different options
         direction = event.signal_type # BUY, SELL
 
-        signal = OrderEvent(timestamp,symbol,order_type,quantity,direction)
-        self._send_signal(signal)
+        order = OrderEvent(timestamp,symbol,order_type,quantity,direction)
+        return(order)
 
-    def _send_signal(self, signal_event):
-        self.event_queue.put(signal_event)
 
     def _decide_order_sizing(self,event):
         '''
@@ -175,14 +173,14 @@ class Portfolio:
             free_cash = self.cash - self.cash_reserve
             current_price = self.current_prices[event.symbol]
             if not current_price or current_price <= 0:
-                self.logger.debug(f'Price for ticker {event.symbol} is invalid')
+                self.logger.info(f'Price for ticker {event.symbol} is invalid')
                 return None
             return free_cash/current_price
         
         elif event.signal_type == 'SELL':
             return pos.quantity
         else:
-            self.logger.debug(f'Currently not implemented signal type {event.signal_type}')
+            self.logger.info(f'Currently not implemented signal type {event.signal_type}')
             return None
 
     def update_fill(self, fill_event):

@@ -49,16 +49,20 @@ class FixedPriceStrategy(BaseStrategy):
         timestamp = event.timestamp
 
         if not self.in_position and price <= self.buy_price:
-            signal = SignalEvent(timestamp, self.symbol, 'LONG')
+            signal = SignalEvent(timestamp, self.symbol, 'BUY')
             self._send_signal(signal)
             self.in_position = True
             self.logger.info(f"[{timestamp}] Buy signal triggered at {price}")
+            return signal
 
         elif self.in_position and price >= self.sell_price:
-            signal = SignalEvent(timestamp, self.symbol, 'EXIT')
+            signal = SignalEvent(timestamp, self.symbol, 'SELL')
             self._send_signal(signal)
             self.in_position = False
             self.logger.info(f"[{timestamp}] Sell signal triggered at {price}")
+            return signal
+        
+        return None
 
     def _send_signal(self, signal_event):
         self.event_queue.put(signal_event)

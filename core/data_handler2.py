@@ -24,7 +24,7 @@ class DataValidators:
                 'High': Column(pa.Float),
                 'Low': Column(pa.Float),
                 'Close': Column(pa.Float),
-                'Volume': Column(pa.Float),
+                'Volume': Column(pa.Float,nullable=True,coerce=True),
                 'Dividend': Column(pa.Float, nullable=True, coerce=True),
                 'StockSplit': Column(pa.Float, nullable=True,coerce=True),
             },
@@ -138,8 +138,30 @@ class DataStore:
             self.data[symbol] = data
         else:
             return None
+        
+    def append_data(self,symbol: str, data: pd.DataFrame) -> None:
+        '''
+        Interface method to append new data in DataStore by outside module
+        Duplicates are dropped, and new data overwrites old data
+        '''
+        data_symbol = data['Symbol'].iloc[0]
+        if data_symbol != symbol:
+            self.logger.debug(f'New data symbol dont match arg symbol: {symbol},{data_symbol}')
+            return None
+        typecheck = self.validator.ohlcv_validate(data)
+        if typecheck:
+            df_combined = pd.concat([self.data[symbol],data])
+            df_duplicates_removed = df_combined[~df_combined.index.duplicated(keep='last')]
+            self.data[symbol] = df_duplicates_removed
+        else:
+            return None
+        
+    def clear_symbol_data(self,symbol: str) -> None:
+        if symbol in self.data:
+            self.logger.info(f'Data cleared for {symbol}')
+            del self.data[symbol]
 
-    def get_closest_price_dummy(self,symbol: str, current_time: datetime) -> pd.DataFrame | None:
+    def get_closest_price_dummy(self,symbol: str, current_time: datetime) -> float | None:
         """
         Returns the latest available price data (row) before or equal to current_time
         from self.data[symbol], or None if no valid data.
@@ -170,7 +192,10 @@ class DataStore:
 
     def get_last_time(self,symbol: str) -> datetime | None:
         '''Interface method to get the final time available for a given symbol'''
-        return self.data[symbol].index.max()
+        if symbol in self.data:
+            return self.data[symbol].index.max()
+        else:
+            return None
 
     def get_symbol_list(self) -> list:
         return list(self.data.keys())
@@ -216,10 +241,13 @@ class YfInterface:
                 end=end_date,
                 interval=interval
             )
-            return df
+            self.logger.info(f'YfInterface downloaded data for: {symbol}')
+            self.logger.info(f'Yfinterface downloaded data with shape: {df.shape}')
         except Exception as e:
             self.logger.debug(f"Error fetching data for {symbol}: {e}")
             return None
+        df = self.comply_column_names(df)
+        return df
 
     def fetch_max_data(self,symbol: str, interval='1d') -> pd.DataFrame | None:
         '''
@@ -238,10 +266,22 @@ class YfInterface:
                 period='max',
                 interval=interval
             )
-            return df
         except Exception as e:
             self.logger.debug(f"Error fetching data for {symbol}: {e}")
             return None
+        df = self.comply_column_names(df)
+        return df
+
+    def comply_column_names(self,df: pd.DataFrame) -> None:
+        '''YFinance column names sometimes don't match expected column name. this helps comply'''
+        if 'Stock Splits' in df.columns:
+            df.rename(columns={'Stock Splits': 'StockSplit'}, inplace=True)
+        if 'Dividends' in df.columns:
+            df.rename(columns={'Dividends': 'Dividend'}, inplace=True)
+        return df
+
+
+
 
 class DataHandler:
     def __init__(self, eventqueue, logger=None):
@@ -295,13 +335,18 @@ class DataHandler:
             start_date = last_time + timedelta(days=redownload_timedelta)
 
         df = self.yfinterface.fetch_data(symbol,start_date,end_date)
+        if 'Symbol' not in df.columns:
+            df['Symbol'] = symbol
 
         typecheck = self.validator.ohlcv_validate(df)
         if not typecheck:
             self.logger.info('DataHandler.fetch_yf_data Typecheck failed')
             return None
         
-        self.datastore.write_data(symbol,df)
+        if symbol not in self.datastore.get_symbol_list():
+            self.datastore.write_data(symbol,df)
+        else:
+            self.datastore.append_data(symbol,df)
     
     def create_market_event(self,index: datetime, next_item: pd.Series) -> MarketEvent:
         event = MarketEvent(
@@ -322,12 +367,22 @@ class DataHandler:
             typecheck = self.validator.ohlcv_validate(df)
             if not typecheck:
                 return None
-            eventqueue_dataframe = pd.concat([eventqueue_dataframe,df])
+            if eventqueue_dataframe.empty:
+                eventqueue_dataframe = df
+            else:
+                eventqueue_dataframe = pd.concat([eventqueue_dataframe,df])
         
-        eventqueue_dataframe = eventqueue_dataframe.sort_index(ascending=True)
+        eventqueue_dataframe = eventqueue_dataframe.sort_index(ascending=False)
+        assert eventqueue_dataframe.index.is_monotonic_decreasing
         for index, row in eventqueue_dataframe.iterrows():
             event = self.create_market_event(index,row)
             self.eventqueue.put(event)
+
+    def clear_symbol_data(self,symbol: str) -> None:
+        self.datastore.clear_symbol_data(symbol)
+
+    def get_price(self,symbol: str, time: datetime) -> float:
+        return self.datastore.get_closest_price_dummy(symbol,time)
 
 if __name__ == '__main__':
     logger = logging.getLogger('logger')

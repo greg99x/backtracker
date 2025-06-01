@@ -32,7 +32,7 @@ stream_handler.setLevel(logging.DEBUG)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
-logger.propagate = False  # Don't bubble up to root logger
+logger.propagate = True  # Don't bubble up to root logger
 
 logger.debug("Logger configured and ready.")
 
@@ -46,7 +46,8 @@ class TestCore(unittest.TestCase):
         
         self.market_calendar.is_market_open.side_effect = mock_is_market_open
 
-        self.event_queue = EventQueue()
+        self.event_list = [] 
+        self.event_queue = EventQueue(logger=logger,log_database=self.event_list)
 
         self.strategy = FixedPriceStrategy(self.event_queue,'BTC-USD',buy_price=30000.0,sell_price=45000.0,logger=logger)
 
@@ -77,7 +78,7 @@ class TestCore(unittest.TestCase):
         self.assertFalse(self.datahandler.datastore.data)
         logger.info(f'Data: {self.datahandler.datastore.data}')
 
-        self.datahandler.read_csv('BTC-USD',r'C:\backtester\dev\test.csv')
+        self.datahandler.read_csv('BTC-USD',r'C:\backtester\dev\btcusd.csv')
 
         # Test that after reading CSV that data_for_market_event is not modified
         # Test that data is read in self.data
@@ -92,17 +93,46 @@ class TestCore(unittest.TestCase):
         #os.remove('test.csv')
         self.datahandler.logger.info('test_data_handler_setupflow end')
 
+    def test_data_handler_yfinance_download(self):
+        #Only works if VPN is disabled        
+        #Test that datastore is emptied when littered manually
+        self.datahandler.datastore.data['AAPL'] = 1
+        self.datahandler.clear_symbol_data('AAPL')
+        self.assertTrue('AAPL' not in self.datahandler.datastore.get_symbol_list())
+        # Test that corrent number of rows is downloaded
+        self.datahandler.fetch_yf_data('AAPL',datetime(2024,12,1),datetime(2025,2,1),interval='1d')
+        self.assertEqual(self.datahandler.datastore.get_all_symbol_data('AAPL').shape,(41,8))
+        logger.info(self.datahandler.datastore.get_all_symbol_data('AAPL'))
+        logger.info(self.datahandler.datastore.get_all_symbol_data('AAPL').shape)
+        logger.info(self.datahandler.yfinterface.yfinance_objects)
 
-        #Only works if VPN is disabled
-        """
-        self.datahandler._clear_data()
-        self.assertFalse(self.datahandler.data)
-        self.datahandler._get_data_from_yf('AAPL',datetime(2024,12,1),datetime(2025,2,1),interval='1d')
-        logger.info(self.datahandler.data)
-        logger.info(self.datahandler.yfinance_objects)
-        """
+    def test_data_handler_yfinance_download(self):
+        #Only works if VPN is disabled        
+        #Test that datastore is emptied when littered manually
+        self.datahandler.datastore.data['AAPL'] = 1
+        self.datahandler.clear_symbol_data('AAPL')
+        self.assertTrue('AAPL' not in self.datahandler.datastore.get_symbol_list())
+        # Test that when multiple downloads are done, shape remains
+        for i in range(10):
+            self.datahandler.fetch_yf_data('AAPL',datetime(2024,12,1),datetime(2025,2,1),interval='1d')
+            self.assertEqual(self.datahandler.datastore.get_all_symbol_data('AAPL').shape,(41,8))
 
+    def test_data_handler_populates_eventqueue(self):
+        self.datahandler.read_csv('BTC-USD',r'C:\backtester\dev\btcusd.csv')
+        self.datahandler.create_event_queue_lazy()
+        self.assertEqual(self.event_queue.size(),self.datahandler.datastore.get_all_symbol_data('BTC-USD').shape[0])
 
+    def test_run_engine(self):
+        self.datahandler.read_csv('BTC-USD',r'C:\backtester\dev\btcusd.csv')
+        self.datahandler.create_event_queue_lazy()
+        created = self.portfolio.create_new_position('BTC-USD')
+        self.engine.run_backtest()
+        log1 = pd.DataFrame(self.portfolio.history)
+        log2 = pd.DataFrame(self.portfolio.trade_log)
+        log3 = pd.DataFrame(self.event_list)
+        log1.to_csv('log1.csv')
+        log2.to_csv('log2.csv')
+        log3.to_csv('log3.csv')
         
 if __name__ == '__main__':
     unittest.main()

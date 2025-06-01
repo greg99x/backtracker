@@ -10,7 +10,8 @@ from copy import deepcopy
 
 # --- Add parent directory to path for importing DataStore ---
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from core.data_handler import DataStore
+from core.data_handler2 import DataHandler
+from core.core import EventQueue
 
 # --- Logger Setup ---
 logger = logging.getLogger('logger')
@@ -33,18 +34,11 @@ logger.debug("Logger configured and ready.")
 # --- Unit Tests ---
 class TestDataStore(unittest.TestCase):
     def setUp(self):
-        self.ds = DataStore(logger=logger)
-        self.symbol = 'AAPL'
-        self.test_csv = 'test_aapl.csv'
-        self.mock_df = pd.DataFrame({
-            'Open': [100, 101],
-            'Close': [102, 103],
-            'Volume': [1000, 1100]
-        }, index=pd.to_datetime(['2024-01-01', '2024-01-02']))
+        self.eventqueue = EventQueue
+        self.ds = DataHandler(self.eventqueue,logger=logger)
+        self.symbol = 'BTC-USD'
+        self.test_csv = r'C:\backtester\dev\btcusd.csv'
 
-    def tearDown(self):
-        if os.path.exists(self.test_csv):
-            os.remove(self.test_csv)
 
     @patch('yfinance.Ticker')
     def test_get_data_from_yf(self, mock_ticker_class):

@@ -1,6 +1,6 @@
 # engine.py
 
-import queue
+from queue import LifoQueue
 from datetime import datetime, timezone
 import logging
 
@@ -31,28 +31,17 @@ class BacktestEngine:
         self.start_time = datetime.now(timezone.utc)
 
         try:
-            while self.data_handler.has_next():
-                # 1. Fetch the next market event
-                market_event = self.data_handler.get_next_event()
-                if market_event is None:
-                    break
+            while not self.event_queue.is_empty():
 
-                self.current_time = market_event.timestamp
-                self.event_queue.put(market_event)
 
-                # 2. Process all events in the queue
-                while not self.event_queue.is_empty():
-                    event = self.event_queue.get()
-                    handler = self.event_handlers.get(event.type)
+                # 2. Process event in the queue
+                event = self.event_queue.get()
+                handler = self.event_handlers.get(event.type)
 
-                    if handler:
-                        handler(event)
-                    else:
-                        self.logger.warning(f"Unknown event type: {event.type}")
-
-                # 3. Optional per-step hooks (e.g. logging, risk checks)
-                if self.on_step:
-                    self.on_step(self.current_time, self)
+                if handler:
+                    handler(event)
+                else:
+                    self.logger.warning(f"Unknown event type: {event.type}")
 
         except Exception as e:
             self.logger.error(f"Backtest failed at {self.current_time}: {e}", exc_info=True)
@@ -61,10 +50,10 @@ class BacktestEngine:
         finally:
             self.end_time = datetime.now(timezone.utc)
             self.logger.info(f"Backtest completed in {(self.end_time - self.start_time).total_seconds():.2f}s")
-            self.output_results()
 
 
     def _handle_market_event(self, event):
+        self.current_time = event.timestamp
         # Strategy should look at market event and either create or not create a signal
         self.strategy.on_market_event(event)
         # Portfolio should update current account finances
@@ -77,6 +66,7 @@ class BacktestEngine:
         if order:
             self.event_queue.put(order)
 
+
     def _handle_order_event(self, event):
         self.broker.handle_event(event,self.current_time)
 
@@ -86,8 +76,10 @@ class BacktestEngine:
 
 
 class EventQueue:
-    def __init__(self):
-        self._queue = queue.Queue()
+    def __init__(self,logger=None,log_database=None):
+        self.logger = logger or logging.getLogger(__name__)    
+        self._queue = LifoQueue()
+        self.log_database=log_database
 
     def put(self, event):
         """Add an event to the queue."""
@@ -97,8 +89,12 @@ class EventQueue:
         """Remove and return the next event from the queue.
         Returns None if the queue is empty."""
         try:
-            return self._queue.get_nowait()
-        except queue.Empty:
+            event = self._queue.get()
+            if event.type != 'MARKET':
+                self.logger.info(str(event))
+            self.log_database.append(str(event))
+            return event
+        except self._queue.Empty:
             return None
 
     def is_empty(self):
