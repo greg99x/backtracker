@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import logging
 from core.event import OrderEvent
 from core.position import Position
+from core.event import Event, MarketEvent, OrderEvent, SignalEvent, FillEvent
 
 class Portfolio:
     def __init__(self, initial_cash, cash_reserve, event_queue, logger=None):
@@ -21,28 +22,24 @@ class Portfolio:
         self.cumulated_slippage = 0.0
         self.cumulated_commission = 0.0
 
-    def create_new_position(self, symbol):
+    def handle_event(self, event: Event) -> None:
         '''
-        Method creates new empty position for a given symbol
-        Should be called before any Event is processed, otherwise the methods in core modules will not take action.
-        Param: symbol
-        Return: True if new position is created
-                False if position already exists
+        Listenst to the event broadcast of the core engine, and routes the appropriate events inside the module.
         '''
-        if not self._position_has_keys(symbol):
-            self.positions[symbol] = Position(symbol,logger=self.logger)
-            return True
-        else:
-            self.logger.warning(f'Position for {symbol} already exists')
-            return False
+        if event.type == 'MARKET':
+            self._handle_market_event(event)
+        elif event.type == 'SIGNAL':
+            self._handle_signal_event(event)
+        elif event.type == 'FILL':
+            self._handle_fill_event(event)
+        elif event.type == 'ORDER':
+            return None
 
-    def update_market(self, event):
+    def _handle_market_event(self, event: MarketEvent) -> None:
         """
         Update the current prices and mark-to-market value of a single position
         based on a new market event.
-
-        Parameters:
-        - event: MarketEvent instance containing price and symbol info.
+        Consume: MarketEvent Emmit: None
         """
         if event.type != 'MARKET' or not self._position_has_keys(event.symbol):
             return
@@ -63,6 +60,76 @@ class Portfolio:
         # Create a snapshot if needed
         if self.enable_snapshots:
             self._record_snapshot()
+
+    def _handle_signal_event(self, event: SignalEvent) -> None:
+        """
+        Translate a signal into a sized order.
+        Consume: SignalEvent Emmit: OrderEvent | None
+     
+        """
+        #If portfolio has a sudden growth, recalculate the cash reserve so trading stays possible
+        self._resize_cash_reserve()
+
+        # return OrderEvent or None
+        if event.type != 'SIGNAL' or not self._position_has_keys(event.symbol):
+            return
+
+        # check if trade should be executed
+        quantity = self._decide_order_sizing(event)
+        if not quantity:
+            return 
+
+        timestamp = event.timestamp
+        symbol = event.symbol
+        order_type = 'MARKET' # Expand on this later with different options
+        direction = event.signal_type # BUY, SELL
+
+        order = OrderEvent(timestamp,symbol,order_type,quantity,direction)
+        self.event_queue.put(order)
+
+    def _handle_fill_event(self, event: FillEvent) -> None:
+        """
+        Apply a fill: update positions, cash, cumulated commission and slippage, 
+        Consume: FillEvent Emmit: None
+        """
+        self.timestamp = event.timestamp
+        symbol = event.symbol
+        
+        # Check if position exists
+        if not self._position_has_keys(symbol):
+            self.logger.debug(f'Order filled for non existing position: {symbol}')
+            return None
+        
+        # Let the position proccess the fill event
+        fill_ok = self.positions[symbol].update_fill(event)
+        if fill_ok:
+            self._deduct_order_value_from_cash(event.fill_price, event.quantity, event.direction)
+            self._deduct_fee_from_cash(event.commission)
+            self._deduct_fee_from_cash(event.slippage)
+            self._update_total_market_value()
+            self._update_cumulated_commission(event)
+            self._update_cumulated_slippage(event)
+            
+            if self.enable_snapshots:
+                self._record_snapshot()
+
+            if self.enable_trade_log:
+                self._update_trade_log(event)
+
+    def create_new_position(self, symbol):
+        '''
+        Method creates new empty position for a given symbol
+        Should be called before any Event is processed, otherwise the methods in core modules will not take action.
+        Param: symbol
+        Return: True if new position is created
+                False if position already exists
+        '''
+        if not self._position_has_keys(symbol):
+            self.positions[symbol] = Position(symbol,logger=self.logger)
+            return True
+        else:
+            self.logger.warning(f'Position for {symbol} already exists')
+            return False
 
     def _update_total_market_value(self):
         # Recalculate total market value
@@ -125,36 +192,8 @@ class Portfolio:
         self.trade_log.append(str(fill_event))
 
     def _resize_cash_reserve(self):
-        self.cash_reserve = self.cash * 0.02
+        self.cash_reserve = self.cash * 0.1
     
-    def generate_order(self, event):
-        """
-        Translate a signal into a sized order.
-        Parameters:
-        - event: SignalEvent instance containing price and symbol info.
-        Generates OrderEvent and puts it in the event_queue      
-        """
-        #If portfolio has a sudden growth, recalculate the cash reserve so trading stays possible
-        self._resize_cash_reserve()
-
-        # return OrderEvent or None
-        if event.type != 'SIGNAL' or not self._position_has_keys(event.symbol):
-            return
-
-        # check if trade should be executed
-        quantity = self._decide_order_sizing(event)
-        if not quantity:
-            return 
-
-        timestamp = event.timestamp
-        symbol = event.symbol
-        order_type = 'MARKET' # Expand on this later with different options
-        direction = event.signal_type # BUY, SELL
-
-        order = OrderEvent(timestamp,symbol,order_type,quantity,direction)
-        return(order)
-
-
     def _decide_order_sizing(self,event):
         '''
         This is a dummy sizing strategy.
@@ -182,36 +221,3 @@ class Portfolio:
             self.cash -= price*quantity
         elif direction == 'SELL':
             self.cash += price*quantity
-
-    def update_fill(self, fill_event):
-        """
-        Apply a fill: update positions, cash, cumulated commission and slippage, 
-        """
-        self.timestamp = fill_event.timestamp
-        symbol = fill_event.symbol
-        
-        # Check if position exists
-        if not self._position_has_keys(symbol):
-            self.logger.debug(f'Order filled for non existing position: {symbol}')
-            return None
-        
-        # Let the position proccess the fill event
-        fill_ok = self.positions[symbol].update_fill(fill_event)
-        if fill_ok:
-            self._deduct_order_value_from_cash(fill_event.fill_price, fill_event.quantity, fill_event.direction)
-            self._deduct_fee_from_cash(fill_event.commission)
-            self._deduct_fee_from_cash(fill_event.slippage)
-            self._update_total_market_value()
-            self._update_cumulated_commission(fill_event)
-            self._update_cumulated_slippage(fill_event)
-            
-            if self.enable_snapshots:
-                self._record_snapshot()
-
-            if self.enable_trade_log:
-                self._update_trade_log(fill_event)
-
-
-
-
-

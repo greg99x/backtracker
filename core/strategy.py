@@ -1,6 +1,6 @@
 # base_strategy.py
 from abc import ABC, abstractmethod
-from core.event import SignalEvent
+from core.event import Event, MarketEvent, OrderEvent, SignalEvent, FillEvent
 import logging
 
 
@@ -12,19 +12,10 @@ class BaseStrategy(ABC):
         self.logger = logger or logging.getLogger(__name__)
 
     @abstractmethod
-    def on_market_event(self, event):
+    def handle_event(self, event: Event) -> None:
         """React to a market event and optionally generate signal(s)."""
         raise NotImplementedError("Subclasses must implement on_market_event")
 
-    @abstractmethod
-    def _send_signal(self, signal_event):
-        """
-        Utility method for placing SignalEvent objects onto the event queue.
-
-        Parameters:
-        - signal_event: An instance of SignalEvent
-        """
-        raise NotImplementedError("Subclasses must implement on_market_event")
 
 
 
@@ -41,31 +32,38 @@ class FixedPriceStrategy(BaseStrategy):
         self.sell_price = sell_price
         self.in_position = False  # Track if we're holding a position
 
-    def on_market_event(self, event):
-        if event.type != 'MARKET' or event.symbol != self.symbol:
-            return
+    def handle_event(self, event: Event) -> None:
+        '''
+        Listenst to the event broadcast of the core engine, and routes the appropriate events inside the module.
+        '''
+        if event.type == 'MARKET':
+            self._handle_market_event(event)
+        elif event.type == 'SIGNAL':
+            return None
+        elif event.type == 'FILL':
+            return None
+        elif event.type == 'ORDER':
+            return None
+        
+    def _handle_market_event(self, event):
+        if event.symbol != self.symbol:
+            return None
 
         price = event.price  # Assuming event has a `price` attribute
         timestamp = event.timestamp
 
         if not self.in_position and price <= self.buy_price:
             signal = SignalEvent(timestamp, self.symbol, 'BUY')
-            self._send_signal(signal)
             self.in_position = True
             self.logger.info(f"[{timestamp}] Buy signal triggered at {price}")
-            return signal
+            self.event_queue.put(signal)
 
         elif self.in_position and price >= self.sell_price:
             signal = SignalEvent(timestamp, self.symbol, 'SELL')
-            self._send_signal(signal)
             self.in_position = False
             self.logger.info(f"[{timestamp}] Sell signal triggered at {price}")
-            return signal
+            self.event_queue.put(signal)
         
         return None
-
-    def _send_signal(self, signal_event):
-        self.event_queue.put(signal_event)
-
 
 

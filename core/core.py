@@ -2,6 +2,7 @@
 
 from queue import LifoQueue
 from datetime import datetime, timezone
+from core.event import Event, MarketEvent, OrderEvent, SignalEvent, FillEvent
 import logging
 
 class BacktestEngine:
@@ -15,12 +16,7 @@ class BacktestEngine:
         self.on_step = None
         self.current_time = None
         self.running = True
-        self.event_handlers = {
-            'MARKET': self._handle_market_event,
-            'SIGNAL': self._handle_signal_event,
-            'ORDER': self._handle_order_event,
-            'FILL': self._handle_fill_event
-        }
+
 
     def run_backtest(self):
         """
@@ -32,16 +28,9 @@ class BacktestEngine:
 
         try:
             while not self.event_queue.is_empty():
-
-
                 # 2. Process event in the queue
                 event = self.event_queue.get()
-                handler = self.event_handlers.get(event.type)
-
-                if handler:
-                    handler(event)
-                else:
-                    self.logger.warning(f"Unknown event type: {event.type}")
+                self.broadcast(event)
 
         except Exception as e:
             self.logger.error(f"Backtest failed at {self.current_time}: {e}", exc_info=True)
@@ -51,28 +40,11 @@ class BacktestEngine:
             self.end_time = datetime.now(timezone.utc)
             self.logger.info(f"Backtest completed in {(self.end_time - self.start_time).total_seconds():.2f}s")
 
-
-    def _handle_market_event(self, event):
+    def broadcast(self, event: Event) -> None:
         self.current_time = event.timestamp
-        # Strategy should look at market event and either create or not create a signal
-        self.strategy.on_market_event(event)
-        # Portfolio should update current account finances
-        self.portfolio.update_market(event)
-        # Broker should handle pending orders
-        self.broker.handle_event(event,self.current_time)
-
-    def _handle_signal_event(self, event):
-        order = self.portfolio.generate_order(event)
-        if order:
-            self.event_queue.put(order)
-
-
-    def _handle_order_event(self, event):
-        self.broker.handle_event(event,self.current_time)
-
-    def _handle_fill_event(self, event):
-        self.portfolio.update_fill(event)
-
+        self.broker.handle_event(event)
+        self.portfolio.handle_event(event)
+        self.strategy.handle_event(event)
 
 
 class EventQueue:

@@ -1,6 +1,6 @@
 # broker.py
 
-from core.event import FillEvent
+from core.event import Event, MarketEvent, OrderEvent, SignalEvent, FillEvent
 from core.core import EventQueue
 import logging
 
@@ -25,32 +25,33 @@ class Broker:
         self.pending_orders = EventQueue()
         self.logger.info('Broker created...')
 
-    def handle_event(self, event, current_time):
+
+    def handle_event(self, event: Event) -> None:
         '''
-        Processes 2 types of event:
-        -MarketEvent: checks pending orders, and processes them
-        -OrderEvent: checks if the market event, if open calls _fill_order, if not, puts in pending order
-        -current_time is needed to check if market is open at the given time
+        Listenst to the event broadcast of the core engine, and routes the appropriate events inside the module.
         '''
-        if event.type == 'ORDER':
-            self._handle_order_event(event,current_time)
+        if event.type == 'MARKET':
+            self._handle_market_event(event)
+        elif event.type == 'SIGNAL':
+            return None
+        elif event.type == 'FILL':
+            return None
+        elif event.type == 'ORDER':
+           self._handle_order_event(event)
 
-        elif event.type == 'MARKET':
-            self._handle_market_event(event,current_time)
-        else:
-            self.logger.debug('Unknown order type in broker.process_order_chain')
-            raise TypeError('Unknown order type in broker.process_order_chain')
-
-
-    def _handle_order_event(self,order_event,current_time):
-        symbol = order_event.symbol
+    def _handle_order_event(self,event: OrderEvent) -> None:
+        symbol = event.symbol
+        current_time = event.timestamp
         if not self.market_calendar.is_market_open(current_time,symbol):
-            self.logger.info(f"OrderEvent: Market closed. Delaying order: {order_event} at {current_time}")
-            self.pending_orders.put(order_event)
+            self.logger.info(f"OrderEvent: Market closed. Delaying order: {event} at {current_time}")
+            self.pending_orders.put(event)
         else:
-            self._fill_order(order_event, current_time)
+            fill_event = self._fill_order(event, current_time)
+            if fill_event is not None:
+                self.event_queue.put(fill_event)
 
-    def _handle_market_event(self,market_event,current_time):
+    def _handle_market_event(self,event: MarketEvent) -> None:
+        current_time = event.timestamp
         requeue = []
         while not self.pending_orders.is_empty():
             order_event = self.pending_orders.get()
@@ -62,13 +63,9 @@ class Broker:
                 requeue.append(order_event)
                 self.logger.info(f"MarketEvent: Market closed. Delaying order: {order_event} at {current_time}")
         for order_event in requeue:
-
             self.pending_orders.put(order_event)
 
     def _fill_order(self, order_event, current_time):
-        if order_event.type != 'ORDER':
-            self.logger.warning(f"Received non-order event in broker: {order_event}")
-            return None
 
         symbol = order_event.symbol
         quantity = order_event.quantity
@@ -107,5 +104,5 @@ class Broker:
             slippage=slippage,
         )
 
-        self.event_queue.put(fill_event)
         self.logger.info(f'Filled order: {symbol},{quantity},{fill_price},{direction}')
+        return fill_event
