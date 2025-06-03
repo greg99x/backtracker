@@ -17,8 +17,6 @@ class BaseStrategy(ABC):
         raise NotImplementedError("Subclasses must implement on_market_event")
 
 
-
-
 class FixedPriceStrategy(BaseStrategy):
     def __init__(self, event_queue, symbol, buy_price, sell_price, data_handler=None, logger=None):
         """

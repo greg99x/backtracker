@@ -146,7 +146,7 @@ class DataStore:
         '''
         data_symbol = data['Symbol'].iloc[0]
         if data_symbol != symbol:
-            self.logger.debug(f'New data symbol dont match arg symbol: {symbol},{data_symbol}')
+            self.logger.warning(f'New data symbol dont match arg symbol: {symbol},{data_symbol}')
             return None
         typecheck = self.validator.ohlcv_validate(data)
         if typecheck:
@@ -218,21 +218,21 @@ class YfInterface:
             try:
                 self.yfinance_objects[symbol] = yf.Ticker(symbol)
             except Exception as e:
-                self.logger.error(f"Creating yfinance.Ticker failed: {e}")
+                self.logger.warning(f"Creating yfinance.Ticker failed: {e}")
                 return None
 
         if isinstance(start_date,datetime):
             try:
                 start_date = start_date.strftime("%Y-%m-%d")
             except Exception as e:
-                self.logger.debug(f'YFinance fetch: Could not translate {start_date} to string')
+                self.logger.warning(f'YFinance fetch: Could not translate {start_date} to string')
                 return None
 
         if isinstance(end_date,datetime):
             try:
                 end_date = end_date.strftime("%Y-%m-%d")
             except Exception as e:
-                self.logger.debug(f'YFinance fetch: Could not translate {end_date} to string')
+                self.logger.warning(f'YFinance fetch: Could not translate {end_date} to string')
                 return None
 
         try:
@@ -244,7 +244,7 @@ class YfInterface:
             self.logger.info(f'YfInterface downloaded data for: {symbol}')
             self.logger.info(f'Yfinterface downloaded data with shape: {df.shape}')
         except Exception as e:
-            self.logger.debug(f"Error fetching data for {symbol}: {e}")
+            self.logger.warning(f"Error fetching data for {symbol}: {e}")
             return None
         df = self.comply_column_names(df)
         return df
@@ -259,7 +259,7 @@ class YfInterface:
             try:
                 self.yfinance_objects[symbol] = yf.Ticker(symbol)
             except Exception as e:
-                self.logger.error(f"Creating yfinance.Ticker failed: {e}")
+                self.logger.warning(f"Creating yfinance.Ticker failed: {e}")
                 return None
         try:
             df = self.yfinance_objects[symbol].history(
@@ -267,7 +267,7 @@ class YfInterface:
                 interval=interval
             )
         except Exception as e:
-            self.logger.debug(f"Error fetching data for {symbol}: {e}")
+            self.logger.warning(f"Error fetching data for {symbol}: {e}")
             return None
         df = self.comply_column_names(df)
         return df
@@ -340,7 +340,7 @@ class DataHandler:
 
         typecheck = self.validator.ohlcv_validate(df)
         if not typecheck:
-            self.logger.info('DataHandler.fetch_yf_data Typecheck failed')
+            self.logger.warning('DataHandler.fetch_yf_data Typecheck failed')
             return None
         
         if symbol not in self.datastore.get_symbol_list():

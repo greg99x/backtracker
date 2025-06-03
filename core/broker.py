@@ -102,7 +102,7 @@ class Broker:
             return None
 
         if price is None:
-            self.logger.debug(f"No price found for symbol: {symbol} {price} {type(price)}")
+            self.logger.warning(f"No price found for symbol: {symbol} {price} {type(price)}")
             return None
 
         # Apply slippage
@@ -122,6 +122,4 @@ class Broker:
             commission=commission,
             slippage=slippage,
         )
-
-        self.logger.info(f'Filled order: {symbol},{quantity},{fill_price},{direction}')
         return fill_event

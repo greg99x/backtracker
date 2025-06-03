@@ -45,7 +45,7 @@ class Position:
         elif direction == 'SELL':
             qty_to_close = fill_qty
             if qty_to_close > self.quantity:
-                self.logger.debug(f'Trying to sell more then held')
+                self.logger.warning(f'Trying to sell more then held')
                 return False
             # Realized PnL = (Sell price - avg cost) * qty sold - commission
             pnl = (fill_price - self.avg_cost) * qty_to_close - commission - slippage
@@ -57,7 +57,7 @@ class Position:
                 self.avg_cost = 0.0
             return True
         else:
-            self.logger.debug(f'Invalid direction in fill event')
+            self.logger.warning(f'Invalid direction in fill event')
             return False
 
     def market_value(self, current_price):

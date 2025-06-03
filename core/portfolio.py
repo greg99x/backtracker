@@ -97,7 +97,7 @@ class Portfolio:
         
         # Check if position exists
         if not self._position_has_keys(symbol):
-            self.logger.debug(f'Order filled for non existing position: {symbol}')
+            self.logger.warning(f'Order filled for non existing position: {symbol}')
             return None
         
         # Let the position proccess the fill event
@@ -141,23 +141,23 @@ class Portfolio:
 
     def _update_cumulated_slippage(self,event):
         if not event.type == 'FILL':
-            self.logger.debug('_update_cumulated_slippage received event with not type FILL')
+            self.logger.warning('_update_cumulated_slippage received event with not type FILL')
             return
         self.cumulated_slippage += event.slippage
 
     def _update_cumulated_commission(self,event):
         if not event.type == 'FILL':
-            self.logger.debug('_update_cumulated_slippage received event with not type FILL')
+            self.logger.warning('_update_cumulated_slippage received event with not type FILL')
             return
         self.cumulated_commission += event.commission
     
     def _deduct_fee_from_cash(self,amount):
         if amount < 0:
-            self.logger.debug('Fee amount can not be less then zero.')
+            self.logger.warning('Fee amount can not be less then zero.')
             return
         self.cash -= amount
         if self.cash < 0:
-            self.logger.debug('Cash is negative after fee deduction')
+            self.logger.warning('Cash is negative after fee deduction')
 
     def _position_has_keys(self, symbol):
         return symbol in self.positions
@@ -177,7 +177,7 @@ class Portfolio:
             if sym in self.current_prices:
                 price = self.current_prices[sym]
             else:
-                self.logger.info('Current price does not exist for snapshot yet')
+                self.logger.warning('Current price does not exist for snapshot yet')
                 price = 0.0
             snapshot['positions'][sym] = {
                 'quantity': pos.quantity,
@@ -206,14 +206,14 @@ class Portfolio:
             free_cash = self.cash - self.cash_reserve
             current_price = self.current_prices[event.symbol]
             if not current_price or current_price <= 0:
-                self.logger.info(f'Price for ticker {event.symbol} is invalid')
+                self.logger.warning(f'Price for ticker {event.symbol} is invalid')
                 return None
             return free_cash/current_price
         
         elif event.signal_type == 'SELL':
             return pos.quantity
         else:
-            self.logger.info(f'Currently not implemented signal type {event.signal_type}')
+            self.logger.warning(f'Currently not implemented signal type {event.signal_type}')
             return None
 
     def _deduct_order_value_from_cash(self,price,quantity,direction):
