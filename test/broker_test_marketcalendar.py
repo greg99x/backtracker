@@ -1,10 +1,11 @@
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, MagicMock
 from datetime import datetime
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.broker import Broker
+from core.core import EventQueue
 from core.event import OrderEvent
 import logging
 
@@ -19,9 +20,11 @@ logger.addHandler(console_handler)
 
 class TestBroker(unittest.TestCase):
     def setUp(self):
-        self.event_queue = Mock()
+        self.event_queue = EventQueue()
         self.price_source = Mock()
         self.market_calendar = Mock()
+        self.event_queue.put = MagicMock()
+
 
         def mock_is_market_open(timestamp, symbol):
             if symbol == 'BTC':
@@ -60,41 +63,48 @@ class TestBroker(unittest.TestCase):
 
 
     def test_two_orders_in_cue(self):
+        self.broker.logger.info('test_two_orders_in_cue')
         market_event = Mock()
         market_event.type = 'MARKET'
         #set time before market open
-        self.current_time = datetime(2024, 1, 1, 8, 0)
+        self.order_event.timestamp = datetime(2024, 1, 1, 8, 0)
+        self.order_event2.timestamp = datetime(2024, 1, 1, 8, 0)
         self.price_source.get_price.return_value = 1.0
 
         #push 2 orders with different market opens
-        self.broker.handle_event(self.order_event,self.current_time)
+        self.broker.handle_event(self.order_event)
         self.assertEqual(self.broker.pending_orders.size(), 1)
-        self.broker.handle_event(self.order_event2,self.current_time)
+        self.broker.handle_event(self.order_event2)
         self.assertEqual(self.broker.pending_orders.size(),2)
 
     
     def test_two_orders_with_only_one_open_market(self):
+        self.broker.logger.info('test_two_orders_with_only_one_open_market')
         self.price_source.get_price.return_value = 1.0
+        self.order_event.timestamp = datetime(2024, 1, 1, 8, 0) # just for clarity
+        self.order_event2.timestamp = datetime(2024, 1, 1, 8, 0) # just for clarity
+
+        
+        #push 2 orders with different market opening hours
+        self.broker.handle_event(self.order_event)
+        self.assertEqual(self.broker.pending_orders.size(), 1)
+        self.broker.handle_event(self.order_event2)
+        self.assertEqual(self.broker.pending_orders.size(),2)
+
+        #set time so only 1 market is open
         market_event = Mock()
         market_event.type = 'MARKET'
-        self.current_time = datetime(2024, 1, 1, 8, 0)
-        
-        #set time before market open
-        self.current_time = datetime(2024, 1, 1, 8, 0)
-        #push 2 orders with different market opens
-        self.broker.handle_event(self.order_event,self.current_time)
-        self.assertEqual(self.broker.pending_orders.size(), 1)
-        self.broker.handle_event(self.order_event2,self.current_time)
-        self.assertEqual(self.broker.pending_orders.size(),2)
-        #set time so only 1 market is open
-        self.current_time = datetime(2024, 1, 1, 9, 0)
-        self.broker.handle_event(market_event,self.current_time)
+        market_event.timestamp = datetime(2024, 1, 1, 9, 0)
+        self.broker.handle_event(market_event)
         self.assertEqual(self.broker.pending_orders.size(), 1)
         fill_event = self.event_queue.put.call_args[0][0]
         self.assertEqual(fill_event.symbol, 'BTC')
-        #set time so both markets are open
-        self.current_time = datetime(2024, 1, 1, 10, 0)
-        self.broker.handle_event(market_event,self.current_time)
+
+        #set time so both market are open
+        market_event = Mock()
+        market_event.type = 'MARKET'
+        market_event.timestamp = datetime(2024, 1, 1, 10, 0)
+        self.broker.handle_event(market_event)
         self.assertEqual(self.broker.pending_orders.size(), 0)
         fill_event = self.event_queue.put.call_args[0][0]
         self.assertEqual(fill_event.symbol, 'AAPL') 
