@@ -48,7 +48,7 @@ class BacktestEngine:
 
 
 class EventQueue:
-    def __init__(self,logger=None,log_database=None):
+    def __init__(self,logger=None,log_database=[]):
         self.logger = logger or logging.getLogger(__name__)    
         self._queue = LifoQueue()
         self.log_database=log_database

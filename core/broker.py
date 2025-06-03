@@ -23,8 +23,6 @@ class Broker:
         self.slippage_perc = slippage_perc
         self.logger = logger or logging.getLogger(__name__)
         self.pending_orders = EventQueue()
-        self.logger.info('Broker created...')
-
 
     def handle_event(self, event: Event) -> None:
         '''
@@ -40,6 +38,23 @@ class Broker:
            self._handle_order_event(event)
 
     def _handle_order_event(self,event: OrderEvent) -> None:
+        if event.order_type != 'MARKET':
+            self.logger.warning(f'Order type: {event.order_type} not supported.')
+            return None
+        try:
+            quantity = float(event.quantity)
+        except Exception as e:
+            self.logger.warning(f'Order quantity must be castable to float: {event.quantity}')
+            return None
+        
+        if event.quantity <= 0:
+            self.logger.warning(f'Order quantity can not be negative or zero for {event.symbol}')
+            return None
+        
+        if event.direction not in ('BUY','SELL'):
+            self.logger.warning(f'Order event must be BUY or SELL but was {event.direction}')
+            return None
+        
         symbol = event.symbol
         current_time = event.timestamp
         if not self.market_calendar.is_market_open(current_time,symbol):
@@ -58,7 +73,9 @@ class Broker:
             symbol = order_event.symbol
 
             if self.market_calendar.is_market_open(current_time,symbol):
-                self._fill_order(order_event, current_time)
+                fill_event = self._fill_order(order_event, current_time)
+                if fill_event is not None:
+                    self.event_queue.put(fill_event)
             else:
                 requeue.append(order_event)
                 self.logger.info(f"MarketEvent: Market closed. Delaying order: {order_event} at {current_time}")
@@ -72,15 +89,17 @@ class Broker:
         direction = order_event.direction
         timestamp = current_time
 
-        if quantity <= 0:
-            self.logger.debug(f'Order quantity can not be negative or zero for {symbol} {timestamp} {direction}')
-            return None
-        if direction not in ('BUY','SELL'):
-            self.logger.debug(f'Order event must be BUY or SELL but was {direction}')
-            return None
-
         # Get current market price
         price = self.price_source.get_price(symbol, current_time)
+        try:
+            price = float(price)
+        except Exception as e:
+            self.logger.debug(f"Price: {price} for order event {symbol} is not castable float")
+            return None
+
+        if price <= 0:
+            self.logger.warning(f'Price for order {symbol} can not be zero or negative')
+            return None
 
         if price is None:
             self.logger.debug(f"No price found for symbol: {symbol} {price} {type(price)}")
