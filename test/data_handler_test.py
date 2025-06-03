@@ -29,7 +29,6 @@ stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
 logger.propagate = False  # Don't bubble up to root logger
 
-logger.debug("Logger configured and ready.")
 
 # --- Unit Tests ---
 class TestDataStore(unittest.TestCase):
