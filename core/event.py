@@ -12,6 +12,8 @@ class Event(ABC):
     def __str__(self):
         return f"{self.__class__.__name__}"
 
+    def snapshot(self):
+        return {k: v for k, v in vars(self).items() if not k.startswith('_')}
 
 class MarketEvent(Event):
     def __init__(self, timestamp, symbol, open, high=None, low=None, close=None, volume=None):

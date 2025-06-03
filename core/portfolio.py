@@ -6,15 +6,14 @@ from core.position import Position
 from core.event import Event, MarketEvent, OrderEvent, SignalEvent, FillEvent
 
 class Portfolio:
-    def __init__(self, initial_cash, cash_reserve, event_queue, logger=None):
+    def __init__(self, initial_cash, cash_reserve, event_queue, logger=None, data_collector=None):
         self.logger = logger or logging.getLogger(__name__)
         self.cash = initial_cash
         self.cash_reserve = cash_reserve
         self.event_queue = event_queue
+        self.data_collector = data_collector
         self.positions = {} #holder for instances of Position class
         self.current_prices = {}    # symbol -> latest price
-        self.history = [] #snapshots from portfolio
-        self.trade_log = []
         self.total_invested_value = 0.0
         self.timestamp = None # Last timestamp from event, not guaranteed to be up to date, handle with care!
         self.enable_snapshots = True
@@ -58,8 +57,10 @@ class Portfolio:
         self._update_total_market_value()
 
         # Create a snapshot if needed
-        if self.enable_snapshots:
-            self._record_snapshot()
+        if self.enable_snapshots and self.data_collector is not None:
+            self._record_portfolio_snapshot()
+            self._record_positions_snapshot()
+
 
     def _handle_signal_event(self, event: SignalEvent) -> None:
         """
@@ -92,7 +93,6 @@ class Portfolio:
         Apply a fill: update positions, cash, cumulated commission and slippage, 
         Consume: FillEvent Emmit: None
         """
-        self.timestamp = event.timestamp
         symbol = event.symbol
         
         # Check if position exists
@@ -109,9 +109,6 @@ class Portfolio:
             self._update_total_market_value()
             self._update_cumulated_commission(event)
             self._update_cumulated_slippage(event)
-            
-            if self.enable_snapshots:
-                self._record_snapshot()
 
             if self.enable_trade_log:
                 self._update_trade_log(event)
@@ -162,34 +159,25 @@ class Portfolio:
     def _position_has_keys(self, symbol):
         return symbol in self.positions
     
-    def _record_snapshot(self):
-        """
-        Save a snapshot of the portfolio at a point in time.
-        """
+    def _record_portfolio_snapshot(self):
+        """ Save a snapshot of the portfolio at a point in time."""
         snapshot = {
             'timestamp': self.timestamp,
             'cash': self.cash,
-            'equity': self.total_invested_value,
-            'positions': {}
-        }
+            'equity': self.total_invested_value}
+        
+        self.data_collector.portfolio_snapshot(snapshot)
 
-        for sym, pos in self.positions.items():
-            if sym in self.current_prices:
-                price = self.current_prices[sym]
-            else:
-                self.logger.warning('Current price does not exist for snapshot yet')
-                price = 0.0
-            snapshot['positions'][sym] = {
-                'quantity': pos.quantity,
-                'avg_price': pos.avg_cost,
-                'market_value': pos.market_value(price),
-                'unrealized PnL': pos.unrealized_pnl(price)
-            }
-
-        self.history.append(snapshot)
+    def _record_positions_snapshot(self):
+        """ Save a snapshot of the positions at a point in time."""
+        for _, pos in self.positions.items():
+            snapshot = pos.snapshot()
+            #Positions dont keep time, so it has to be added manually to log!
+            snapshot['timestamp'] = self.timestamp
+            self.data_collector.position_snapshot(snapshot)
 
     def _update_trade_log(self, fill_event):
-        self.trade_log.append(str(fill_event))
+        self.data_collector.fill_snapshot(fill_event.snapshot())
 
     def _resize_cash_reserve(self):
         self.cash_reserve = self.cash * 0.1

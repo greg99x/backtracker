@@ -3,17 +3,20 @@
 from queue import LifoQueue
 from datetime import datetime, timezone
 from core.event import Event, MarketEvent, OrderEvent, SignalEvent, FillEvent
+from core.metrics import DataCollector
 import logging
 
 class BacktestEngine:
-    def __init__(self, event_queue, data_handler, strategy, broker, portfolio, logger=None):
+    def __init__(self, event_queue, data_handler, strategy, 
+                 broker, portfolio, data_collector, logger=None):
         self.event_queue = event_queue
         self.data_handler = data_handler
         self.strategy = strategy
         self.broker = broker
         self.portfolio = portfolio
+        self.data_collector = data_collector
         self.logger = logger or logging.getLogger(__name__)
-        self.on_step = None
+        self.on_step = True
         self.current_time = None
         self.running = True
 
@@ -31,6 +34,8 @@ class BacktestEngine:
                 # 2. Process event in the queue
                 event = self.event_queue.get()
                 self.broadcast(event)
+                if self.on_step:
+                    self.data_collector.event_snapshot(event.snapshot())
 
         except Exception as e:
             self.logger.error(f"Backtest failed at {self.current_time}: {e}", exc_info=True)
@@ -48,10 +53,9 @@ class BacktestEngine:
 
 
 class EventQueue:
-    def __init__(self,logger=None,log_database=[]):
+    def __init__(self,logger=None):
         self.logger = logger or logging.getLogger(__name__)    
         self._queue = LifoQueue()
-        self.log_database=log_database
 
     def put(self, event):
         """Add an event to the queue."""
@@ -62,9 +66,6 @@ class EventQueue:
         Returns None if the queue is empty."""
         try:
             event = self._queue.get()
-            if event.type != 'MARKET':
-                self.logger.info(str(event))
-            self.log_database.append(str(event))
             return event
         except self._queue.Empty:
             return None

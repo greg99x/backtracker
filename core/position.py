@@ -67,6 +67,16 @@ class Position:
     def unrealized_pnl(self, current_price):
         """Calculate unrealized PnL based on current price."""
         return (current_price - self.avg_cost) * self.quantity
+    
+    def snapshot(self):
+        snapshot = {}
+        snapshot['symbol'] = self.symbol
+        snapshot['quantity'] = self.quantity
+        snapshot['avg_cost'] = self.avg_cost
+        snapshot['realized_pnl'] = self.realized_pnl
+        snapshot['cumulated_comission'] = self.cumulated_commission
+        snapshot['cumulated_slippage'] = self.cumulated_slippage
+        return snapshot
 
     def __str__(self):
         return (f"Position(symbol={self.symbol}, qty={self.quantity:.4f}, avg_cost={self.avg_cost:.2f}, "

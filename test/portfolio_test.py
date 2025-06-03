@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from collections import namedtuple
 from core.core import EventQueue
 from core.event import Event, MarketEvent, OrderEvent, SignalEvent, FillEvent
+from core.metrics import DataCollector
 
 # Setup logger to print to console
 logger = logging.getLogger('logger')
@@ -30,11 +31,15 @@ class MockPosition:
         self.update_fill = MagicMock(return_value=True)
         self.market_value = MagicMock(return_value=1000)
         self.unrealized_pnl = MagicMock(return_value=50)
+        self.snapshot = MagicMock(return_value={})
 
 class TestPortfolio(unittest.TestCase):
     def setUp(self):
         self.event_queue = EventQueue() # This is only valid as long as the queue is really only a queue!
-        self.portfolio = Portfolio(initial_cash=10000, cash_reserve=1000, event_queue=self.event_queue,logger=logger)
+        self.data_collector = DataCollector()
+        self.portfolio = Portfolio(initial_cash=10000, cash_reserve=1000,
+                                    event_queue=self.event_queue,logger=logger,
+                                    data_collector=self.data_collector)
         
         # Patch Position class inside Portfolio to use our MockPosition
         patcher = patch('core.portfolio.Position', MockPosition)
@@ -69,7 +74,6 @@ class TestPortfolio(unittest.TestCase):
         self.assertEqual(self.portfolio.current_prices['AAPL'], 150)
         self.assertGreaterEqual(self.portfolio.total_invested_value, 0)
         self.assertEqual(self.portfolio.timestamp, 123456789)
-        self.assertTrue(len(self.portfolio.history) > 0)
 
     def test_generate_order_puts_order_event_in_queue(self):
         self.portfolio.logger.info('test_generate_order_puts_order_event_in_queue')
@@ -88,6 +92,7 @@ class TestPortfolio(unittest.TestCase):
 
     def test_update_fill_updates_cash_and_position(self):
         self.portfolio.logger.info('test_update_fill_updates_cash_and_position')
+        self.portfolio.enable_snapshots = True #Make sure snapshot will be created
         self.portfolio.positions['AAPL'] = MockPosition('AAPL')
         fill_event = FillEvent(
             symbol='AAPL', quantity=5, fill_price=105,
@@ -105,10 +110,6 @@ class TestPortfolio(unittest.TestCase):
         # Cumulated values updated
         self.assertEqual(self.portfolio.cumulated_commission, 10)
         self.assertEqual(self.portfolio.cumulated_slippage, 2)
-
-        # Snapshot and trade log recorded
-        self.assertTrue(len(self.portfolio.history) > 0)
-        self.assertTrue(len(self.portfolio.trade_log) > 0)
 
 if __name__ == '__main__':
     unittest.main()

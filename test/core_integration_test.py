@@ -17,6 +17,7 @@ from core.portfolio import Portfolio
 from core.position import Position
 from core.strategy import FixedPriceStrategy
 from core.core import EventQueue
+from core.metrics import DataCollector
 
 # --- Logger Setup ---
 logger = logging.getLogger('logger')
@@ -44,8 +45,9 @@ class TestCore(unittest.TestCase):
         
         self.market_calendar.is_market_open.side_effect = mock_is_market_open
 
-        self.event_list = [] 
-        self.event_queue = EventQueue(logger=logger,log_database=self.event_list)
+        self.event_queue = EventQueue(logger=logger)
+
+        self.data_collector = DataCollector()
 
         self.strategy = FixedPriceStrategy(self.event_queue,'BTC-USD',buy_price=30000.0,sell_price=45000.0,logger=logger)
 
@@ -65,7 +67,7 @@ class TestCore(unittest.TestCase):
                                      strategy=self.strategy,
                                      broker=self.broker,
                                      portfolio=self.portfolio,
-                                     logger=logger)
+                                     logger=logger, data_collector=self.data_collector)
 
     
     def test_data_handler_setupflow(self):
@@ -120,17 +122,5 @@ class TestCore(unittest.TestCase):
         self.datahandler.create_event_queue_lazy()
         self.assertEqual(self.event_queue.size(),self.datahandler.datastore.get_all_symbol_data('BTC-USD').shape[0])
 
-    def test_run_engine(self):
-        self.datahandler.read_csv('BTC-USD',r'C:\backtester\dev\btcusd.csv')
-        self.datahandler.create_event_queue_lazy()
-        created = self.portfolio.create_new_position('BTC-USD')
-        self.engine.run_backtest()
-        log1 = pd.DataFrame(self.portfolio.history)
-        log2 = pd.DataFrame(self.portfolio.trade_log)
-        log3 = pd.DataFrame(self.event_list)
-        log1.to_csv('log1.csv')
-        log2.to_csv('log2.csv')
-        log3.to_csv('log3.csv')
-        
 if __name__ == '__main__':
     unittest.main()
