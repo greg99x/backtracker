@@ -10,7 +10,7 @@ from time import time
 
 # --- Add parent directory to path for importing DataStore ---
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from core.data_handler2 import DataHandler
+from core.data_handler import DataHandler
 from core.core import BacktestEngine
 from core.broker import Broker
 from core.portfolio import Portfolio

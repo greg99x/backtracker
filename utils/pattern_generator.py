@@ -5,7 +5,7 @@ import datetime
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from core.data_handler2 import DataValidators
+from core.data_handler import DataValidators
 import mplfinance as mpf
 
 class PatternGenerator:

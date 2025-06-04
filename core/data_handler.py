@@ -1,80 +1,214 @@
-
 import pandas as pd
 import yfinance as yf
 import os
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from datetime import datetime, timedelta
 import logging
 from core.event import MarketEvent
+from core.core import EventQueue
 from time import time
+import numpy as np
+import pandera.pandas as pa
+from pandera.pandas import Column
+from functools import wraps
+
+class DataValidators:
+    def __init__(self, logger=None):
+        self.logger = logger or logging.getLogger(__name__)
+        # Define a fixed OHLCV schema
+        self.ohlcv_schema = pa.DataFrameSchema(
+            {
+                'Symbol': Column(pa.String),
+                'Open': Column(pa.Float),
+                'High': Column(pa.Float),
+                'Low': Column(pa.Float),
+                'Close': Column(pa.Float),
+                'Volume': Column(pa.Float,nullable=True,coerce=True),
+                'Dividend': Column(pa.Float, nullable=True, coerce=True),
+                'StockSplit': Column(pa.Float, nullable=True,coerce=True),
+            },
+            index=pa.Index(pa.DateTime, name="Date",coerce=True)
+        )
+
+    def ohlcv_validate(self, df: pd.DataFrame | None, lazy=True) -> bool:
+        """
+        Method to validate a DataFrame using the fixed OHLCV schema.
+
+        Args:
+            coerce (bool): Coerce dtypes
+            lazy (bool): Report all schema errors
+        """
+        if df is None:
+            return False
+        
+        if not isinstance(df, pd.DataFrame):
+            self.logger.error(f"Validation error: Input is not a pandas DataFrame but {type(df)}")
+            return False
+        try:
+            self.ohlcv_schema.validate(df, lazy=lazy)
+        except pa.errors.SchemaErrors as err:
+            self.logger.error(f'Error in ohlcv validation: {err}')
+            return False
+        return True
+
+class Csvio:
+    def __init__(self, logger=None):
+        self.logger = logger or logging.getLogger(__name__)
+
+    def read_csv(self, filename: str) -> pd.DataFrame | None:
+        '''read file to CSV with optional logging'''
+        try:
+            if not os.path.exists(filename):
+                self.logger.error(f"File '{filename}' does not exist.")
+                return None
+            
+            df = pd.read_csv(filename, parse_dates=['Date'])
+            df = df.set_index('Date')
+            return df
+        except Exception as e:
+            self.logger.error(f"Error reading CSV: {e}")
+            return None
+
+    def write_csv(self, df: pd.DataFrame, filename: str, log=True) -> bool:
+        '''Write CSV file, from data dict for given symbol to file 'filename'''
+        try:
+            df.to_csv(filename)
+            return True
+        except Exception as e:
+            if log:
+                self.logger.error(f"Error writing CSV for {filename}: {e}")
+            return False
 
 class DataStore:
     def __init__(self, logger=None):
         self.logger = logger or logging.getLogger(__name__)
-        self.data = {}  # Contains current full data. key: symbol
-        self.yfinance_objects = {}  # Contains instances of yf.Ticker
-        self.data_for_market_event = pd.DataFrame(columns=[
-            'Symbol',
-            'Date',
-            'Open',
-            'High',
-            'Low',
-            'Close',
-            'Volume',
-            'MarketEvent' #Flag for whether marketevent has been already called
-        ])
-        self.data_for_market_event = self.data_for_market_event.set_index('Date')
-
-
-    def _clear_data(self):
-        self.data={}
-
-    def _clear_data_for_market_event(self):
-        self.data_for_market_event = pd.DataFrame(columns=[
-            'Symbol',
-            'Date',
-            'Open',
-            'High',
-            'Low',
-            'Close',
-            'Volume',
-            'MarketEvent' #Flag for whether marketevent has been already called
-        ])
-        self.data_for_market_event = self.data_for_market_event.set_index('Date')
-
-    def read_csv(self, symbol, filename) -> bool:
+        self.validator = DataValidators(logger=self.logger)
         '''
-        Read data from CSV file, for given ticker
+        Data format required:
+
+        | Column      | Type             | Description               |
+        |-------------|------------------|---------------------------|
+        | Date (index)| datetime64[ns]   | Index, must be sorted     |
+        | Symbol      | string           | Symbol ticker of asset    |
+        | Open        | float64          | Opening price             |
+        | High        | float64          | Daily high                |
+        | Low         | float64          | Daily low                 |
+        | Close       | float64          | Closing price             |
+        | Volume      | float64          | Trading volume            |
+        | Dividens    | float64          | Paid dividens             |
+        | Stocksplit  | float64          | Stocksplit                |
+
+        self.data:
+        Dict that stores pandas frames with market data
+        key: symbol: str
+        value: data: PandasFrame indexed by date
+        This is used to interface with I/O modules, yfinance API etc.
         '''
-        try:
-            if not os.path.exists(filename):
-                self.logger.info(f"File '{filename}' does not exist.")
-                return False
-            
-            df = pd.read_csv(filename, parse_dates=['Date'])
-            df = df.set_index('Date')
-            self.data[symbol] = df
-            self.logger.info(f'Read data with shape: {df.shape}')
-            self.logger.info(f'Reader: Last date in date: {df.index.max()}')
-            return True
+        self.data = {}
+
+        '''
+        Used for reducing boilerplate later, to easily create DataFrames
+        set_index(Date) must be used when using this template for empty frames 
+        '''
+        self.ohlcv_column_dtypes = {
+        'Symbol': 'string',
+        'Date': 'datetime64[ns]',
+        'Open': 'float64',
+        'High': 'float64',
+        'Low': 'float64',
+        'Close': 'float64',
+        'Volume': 'float64',
+        'Dividend': 'float64',
+        'StockSplit': 'float64'}
         
-        except Exception as e:
-            print(f"Error reading CSV for {symbol}: {e}")
-            return False
+    def _create_empty_OHLCV_frame(self) -> pd.DataFrame | None:
+        df = pd.DataFrame({col: pd.Series(dtype=dt) for col, dt in self.ohlcv_column_dtypes.items()})
+        df = df.set_index('Date')
+        typecheck = self.validator.ohlcv_validate(df)
+        if typecheck:
+            return df
+        else:
+            return None
 
-    def write_csv(self, symbol, filename) -> bool:
+    def write_data(self,symbol: str, data: pd.DataFrame) -> None:
+        '''Interface method to update data in DataStore by outside modules'''
+        typecheck = self.validator.ohlcv_validate(data)
+        if typecheck:
+            self.data[symbol] = data
+        else:
+            return None
+        
+    def append_data(self,symbol: str, data: pd.DataFrame) -> None:
         '''
-        Write CSV file, from data dict for given symbol to file 'filename'
+        Interface method to append new data in DataStore by outside module
+        Duplicates are dropped, and new data overwrites old data
         '''
-        try:
-            self.data[symbol].to_csv(filename)
-            self.logger.info(f'Wrote data with shape: {self.data[symbol].shape}')
-            self.logger.info(f'Writer: Last date in data: {self.data[symbol].index.max()}')
-            return True
-        except Exception as e:
-            self.logger.debug(f"Error writing CSV for {symbol}: {e}")
-            return False
+        data_symbol = data['Symbol'].iloc[0]
+        if data_symbol != symbol:
+            self.logger.warning(f'New data symbol dont match arg symbol: {symbol},{data_symbol}')
+            return None
+        typecheck = self.validator.ohlcv_validate(data)
+        if typecheck:
+            df_combined = pd.concat([self.data[symbol],data])
+            df_duplicates_removed = df_combined[~df_combined.index.duplicated(keep='last')]
+            self.data[symbol] = df_duplicates_removed
+        else:
+            return None
+        
+    def clear_symbol_data(self,symbol: str) -> None:
+        if symbol in self.data:
+            self.logger.info(f'Data cleared for {symbol}')
+            del self.data[symbol]
 
-    def _get_data_from_yf(self, symbol, start_date=None, end_date=None, interval='1d') -> pd.DataFrame:
+    def get_closest_price_dummy(self,symbol: str, current_time: datetime) -> float | None:
+        """
+        Returns the latest available price data (row) before or equal to current_time
+        from self.data[symbol], or None if no valid data.
+        Currently returns the close price when called. Needs much more complex behaviour!
+        """
+        if symbol not in self.data:
+            self.logger.warning(f"No data available for symbol: {symbol}")
+            return None
+
+        df = self.data[symbol]
+
+        # Filter all timestamps <= current_time
+        valid_times = df.index[df.index <= pd.to_datetime(current_time)]
+        if valid_times.empty:
+            self.logger.warning(f"No data before {current_time} for {symbol}.")
+            return None
+
+        # Get latest row before or at current_time
+        closest_time = valid_times.max()
+
+        return df.loc[closest_time]['Close']
+    
+    def get_all_symbol_data(self,symbol: str) -> pd.DataFrame | None:
+        '''Interface method to get all available data for given symbol'''
+        if symbol not in self.data.keys():
+            return None
+        return self.data[symbol]
+
+    def get_last_time(self,symbol: str) -> datetime | None:
+        '''Interface method to get the final time available for a given symbol'''
+        if symbol in self.data:
+            return self.data[symbol].index.max()
+        else:
+            return None
+
+    def get_symbol_list(self) -> list:
+        return list(self.data.keys())
+
+class YfInterface:
+    def __init__(self, logger=None):
+        self.logger = logger or logging.getLogger(__name__)
+        """
+        Storage for instances of yfinance.Ticker objects, so that they don't need instanciation every time.
+        """
+        self.yfinance_objects = {}
+
+    def fetch_data(self, symbol: str, start_date: datetime, end_date: datetime, interval='1d') -> pd.DataFrame | None:
         '''
         Wrapper function for yf.Ticker.history calls
         Return pd.DataFrame with downloaded history
@@ -83,223 +217,185 @@ class DataStore:
         if symbol not in self.yfinance_objects:
             try:
                 self.yfinance_objects[symbol] = yf.Ticker(symbol)
-                self.logger.info(f'Ticker created: {symbol}')
             except Exception as e:
-                self.logger.error(f"Creating yfinance.Ticker failed: {e}")
-                raise
-
-        self.logger.info(start_date)
-        self.logger.info(type(start_date))
+                self.logger.warning(f"Creating yfinance.Ticker failed: {e}")
+                return None
 
         if isinstance(start_date,datetime):
             try:
                 start_date = start_date.strftime("%Y-%m-%d")
             except Exception as e:
-                self.logger.debug(f'Could not translate {start_date} to string')
-        self.logger.info(start_date)
-        self.logger.info(type(start_date))
+                self.logger.warning(f'YFinance fetch: Could not translate {start_date} to string')
+                return None
+
         if isinstance(end_date,datetime):
             try:
                 end_date = end_date.strftime("%Y-%m-%d")
             except Exception as e:
-                self.logger.debug(f'Could not translate {end_date} to string')
+                self.logger.warning(f'YFinance fetch: Could not translate {end_date} to string')
+                return None
 
         try:
-            if not start_date and not end_date:
-                df = self.yfinance_objects[symbol].history(
-                    period='max',
-                    interval=interval
-                )
-            else:
-                df = self.yfinance_objects[symbol].history(
-                    start=start_date,
-                    end=end_date,
-                    interval=interval
-                )
-            return df
+            df = self.yfinance_objects[symbol].history(
+                start=start_date,
+                end=end_date,
+                interval=interval
+            )
+            self.logger.info(f'YfInterface downloaded data for: {symbol}')
+            self.logger.info(f'Yfinterface downloaded data with shape: {df.shape}')
         except Exception as e:
-            self.logger.debug(f"Error fetching data for {symbol}: {e}")
-            return pd.DataFrame()
+            self.logger.warning(f"Error fetching data for {symbol}: {e}")
+            return None
+        df = self.comply_column_names(df)
+        return df
 
-
-    def update_data(self, symbol, end_date=None, redownload_timedelta=-1) -> bool:
-            '''
-            Checks last available price in data, and download missing date until the date 'end_date'
-            Return True if success
-            Return False if error
-            '''
-            if symbol not in self.data:
-                self.data[symbol] = pd.DataFrame()
-                self.logger.info(f'Symbol {symbol} not in data yet.')
-
-            if redownload_timedelta > 0:
-                self.logger.debug('Timedelta for downloading data must be negative')
-                return False
-
-            df_existing = self.data[symbol]
-            last_date = df_existing.index.max() if not df_existing.empty else None
-
-            # Define the start of the new range
-            if last_date is None:
-                start_date = None  # get full history
-                self.logger.info('Start date for update is none')
-            else:
-                start_date = (last_date + timedelta(days=redownload_timedelta)).strftime('%Y-%m-%d')
-                self.logger.info(f'Start date for update is {start_date}')
-
-            if end_date is None:
-                end_date = None
-                self.logger.info('End date is none')
-            else:
-                end_date = end_date.strftime('%Y-%m-%d')
-                self.logger.info(f'End date is {end_date}')
-            
+    def fetch_max_data(self,symbol: str, interval='1d') -> pd.DataFrame | None:
+        '''
+        Wrapper function for yf.Ticker.history calls with max as period
+        Return pd.DataFrame with downloaded history
+        For now, only tested to work on time interval '1d'
+        '''
+        if symbol not in self.yfinance_objects:
             try:
-                new_data = self._get_data_from_yf(symbol, start_date=start_date, end_date=end_date)
-
-
-                if new_data.empty:
-                    self.logger.info(f"No new data downloaded for {symbol}.")
-                    return False
-
-                self.logger.info(f'Downloaded data with shape: {new_data.shape}')
-                self.data[symbol] = pd.concat([df_existing, new_data]).sort_index().drop_duplicates()
-                return True
-            
+                self.yfinance_objects[symbol] = yf.Ticker(symbol)
             except Exception as e:
-                self.logger.debug(f"Failed to update data for {symbol}: {e}")
-                return False
+                self.logger.warning(f"Creating yfinance.Ticker failed: {e}")
+                return None
+        try:
+            df = self.yfinance_objects[symbol].history(
+                period='max',
+                interval=interval
+            )
+        except Exception as e:
+            self.logger.warning(f"Error fetching data for {symbol}: {e}")
+            return None
+        df = self.comply_column_names(df)
+        return df
 
-    def _check_OHLCV_format(self,symbol) -> bool:
-        if symbol not in self.data:
-            self.logger.info(f'_check_OHLCV_format: Symbol {symbol} not in DataStore data.') 
-            return False
-        
-        required_columns = {'Open', 'High', 'Low', 'Close', 'Volume'}
-        data = self.data[symbol]
+    def comply_column_names(self,df: pd.DataFrame) -> None:
+        '''YFinance column names sometimes don't match expected column name. this helps comply'''
+        if 'Stock Splits' in df.columns:
+            df.rename(columns={'Stock Splits': 'StockSplit'}, inplace=True)
+        if 'Dividends' in df.columns:
+            df.rename(columns={'Dividends': 'Dividend'}, inplace=True)
+        return df
 
-        if data.index.name != 'Date':
-            self.logger.warning(f'Index for {symbol} is not Date')
-            return False
-        
-        # Ensure index is datetime
-        if not pd.api.types.is_datetime64_any_dtype(data.index):
-            self.logger.warning(f"Index for {symbol} data is not datetime.")
-            return False
 
-        if data.empty:
-            self.logger.info(f'_check_OHLCV_format: Data for {symbol} is empty.')
-            return False
+class DataHandler:
+    def __init__(self, eventqueue, logger=None):
+        self.eventqueue = eventqueue
+        self.logger = logger or logging.getLogger(__name__)
+        self.validator = DataValidators(logger=self.logger)
+        self.datastore = DataStore(logger=self.logger)
+        self.csvio = Csvio(logger=self.logger)
+        self.yfinterface = YfInterface(logger=self.logger)
+
+    def read_csv(self, symbol: str, filename: str, log=True) -> None:
+        df = self.csvio.read_csv(filename)
         
-        return required_columns.issubset(data.columns)
+        if df is None:
+            self.logger.info(f'No data to write to CSV: {symbol}')
+            return None
+        
+        typecheck = self.validator.ohlcv_validate(df)
+        if not typecheck:
+            return None
+        
+        self.datastore.write_data(symbol,df)
+        if log:
+            self.logger.info(f'Read data with shape: {df.shape}')
+            self.logger.info(f'Reader: Last date in date: {df.index.max()}')
     
-    def get_price(self, symbol, current_time):
-        """
-        Returns the latest available price data (row) before or equal to current_time
-        from self.data[symbol], or None if no valid data.
-        Currently returns the close price when called. Might need enhancement
-        """
-        if symbol not in self.data:
-            self.logger.warning(f"No data available for symbol: {symbol}")
+    def write_csv(self,symbol: str, filename: str, log=True) -> None:
+
+        df = self.datastore.get_all_symbol_data(symbol)
+
+        if df is None:
             return None
-
-        if self._check_OHLCV_format(symbol):
-            return None
-
-        df = self.data[symbol]
-
-        # Filter all timestamps <= current_time
-        valid_times = df.index[df.index <= pd.to_datetime(current_time)]
-        if valid_times.empty:
-            self.logger.info(f"No data before {current_time} for {symbol}.")
-            return None
-
-        # Get latest row before or at current_time
-        closest_time = valid_times.max()
-
-        #Check if line is OHLCV or just a single line
-        line = df.loc[closest_time]
-        return df.loc[closest_time]['Close']
-
-    def create_data_for_eventqueue(self):
-        self.logger.debug(f"Symbols in data: {list(self.data.keys())}")
-        for symbol, data in self.data.items():
-            # Only proceed if data format is correct (invert your logic)
-            if not self._check_OHLCV_format(symbol):
-                self.logger.warning(f"Data format check failed for symbol {symbol}")
-                continue  # skip this symbol
-            else:
-                self.logger.info('Data format checking passed')
-            
-            #Important limitation!!!! Later need to be revised if more info is needed
-            columns_to_copy = ['Open','High','Low','Close','Volume']
-            copy_data = data.copy(columns_to_copy)
-            
-            # Add required columns for data_for_market_event
-            copy_data['Symbol'] = symbol
-            copy_data['MarketEvent'] = 0.0
-            
-            # Make sure index name is 'Date' for consistency
-            if copy_data.index.name != 'Date':
-                copy_data = copy_data.set_index('Date')
-            
-            # Append to existing DataFrame
-            if self.data_for_market_event.empty and not copy_data.empty :
-                self.data_for_market_event = copy_data
-            else:
-                self.data_for_market_event = pd.concat([self.data_for_market_event, copy_data])
         
-        # Sort by index (Date) ascending
-        self.data_for_market_event = self.data_for_market_event.sort_index()
-
-    def has_next(self) -> bool:
-        # Method for core engine to see if there is still unprocessed data that should go to market events.
-        # Return false if data was not loaded.
-        if self.data_for_market_event.empty:
-            self.logger.debug('has_next: data_for_market_event is empty.')
-            return False
+        typecheck = self.validator.ohlcv_validate(df)
+        if not typecheck:
+            return None
         
-        return self.data_for_market_event.iloc[-1]['MarketEvent'] == 0
+        self.csvio.write_csv(df,filename)
+        if log:
+            self.logger.info(f'Wrote data with shape: {df.shape}')
+            self.logger.info(f'Writer: Last date in data: {df.index.max()}')
+
+    def write_symbol_data(self,symbol: str, data: pd.DataFrame) -> None:
+        self.datastore.write_data(symbol,data)
+        
+    def fetch_yf_data(self,symbol: str, start_date: datetime, end_date: datetime, interval='1d',redownload_timedelta=-1) -> None:
+        if end_date > datetime.now():
+            # end_date can't be in the future
+            return None
+        
+        last_time = self.datastore.get_last_time(symbol)
+
+        if last_time is not None:
+            start_date = last_time + timedelta(days=redownload_timedelta)
+
+        df = self.yfinterface.fetch_data(symbol,start_date,end_date)
+        if 'Symbol' not in df.columns:
+            df['Symbol'] = symbol
+
+        typecheck = self.validator.ohlcv_validate(df)
+        if not typecheck:
+            self.logger.warning('DataHandler.fetch_yf_data Typecheck failed')
+            return None
+        
+        if symbol not in self.datastore.get_symbol_list():
+            self.datastore.write_data(symbol,df)
+        else:
+            self.datastore.append_data(symbol,df)
     
-    def get_next_event(self):
-        time1 = time()
-        next_item = self.data_for_market_event[self.data_for_market_event['MarketEvent'] == 0].iloc[0]
-        # Create market event
-        time2 = time()
+    def create_market_event(self,index: datetime, next_item: pd.Series) -> MarketEvent:
         event = MarketEvent(
-        timestamp = next_item.name,
+        timestamp = index,
         symbol = next_item['Symbol'],
         open = next_item['Open'],
         high = next_item['High'],
         low = next_item['Low'],
         close = next_item ['Close'],
         volume = next_item['Volume'])
-        time3 = time()
-        # Set flag in data_for_market_event that event was already created.
-        index = self.data_for_market_event[self.data_for_market_event['MarketEvent']==0].index[0]
-        self.data_for_market_event.loc[index,'MarketEvent'] = 1
-        time4 = time()
-        return [event, time2-time1, time3-time2, time4-time3]
+        return event
 
+    def create_event_queue_lazy(self) -> None:
+        symbols = self.datastore.get_symbol_list()
+        eventqueue_dataframe = self.datastore._create_empty_OHLCV_frame()
+        for symbol in symbols:
+            df = self.datastore.get_all_symbol_data(symbol)
+            typecheck = self.validator.ohlcv_validate(df)
+            if not typecheck:
+                return None
+            if eventqueue_dataframe.empty:
+                eventqueue_dataframe = df
+            else:
+                eventqueue_dataframe = pd.concat([eventqueue_dataframe,df])
+        
+        eventqueue_dataframe = eventqueue_dataframe.sort_index(ascending=False)
+        assert eventqueue_dataframe.index.is_monotonic_decreasing
+        for index, row in eventqueue_dataframe.iterrows():
+            event = self.create_market_event(index,row)
+            self.eventqueue.put(event)
 
+    def clear_symbol_data(self,symbol: str) -> None:
+        self.datastore.clear_symbol_data(symbol)
 
+    def get_price(self,symbol: str, time: datetime) -> float:
+        return self.datastore.get_closest_price_dummy(symbol,time)
 
-
-
-
-
-
-'''
 if __name__ == '__main__':
     logger = logging.getLogger('logger')
     logger.setLevel(logging.DEBUG)  # Set minimum level to DEBUG
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.DEBUG)  # Also handle DEBUG level logs
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-    data_store = DataStore(logger=logger)
-    read_status = data_store.read_csv('BTC-USD','btcusd.csv')
-    status = data_store.update_data('BTC-USD',redownload_timedelta=-2)
-    data_store.write_csv('BTC-USD','btcusd.csv')
-'''
+    eventqueue = EventQueue()
+    core = DataHandler(eventqueue,logger=logger)
+    core.read_csv('BTC-USD',r'C:\backtester\dev\test.csv',log=True)
+    df = core.datastore.get_all_symbol_data('BTC-USD')
+    start = time()
+    core.create_event_queue_lazy()
+    print(time()-start)
+    event = eventqueue.get()
+    print(event.type,event.timestamp,event.symbol,event.price,event.open,event.high,event.low,event.close, event.volume)
+    print(eventqueue.size())
+    print(core.datastore.get_last_time('BTC-USD'))
