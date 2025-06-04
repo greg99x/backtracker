@@ -35,7 +35,10 @@ class BacktestEngine:
                 event = self.event_queue.get()
                 self.broadcast(event)
                 if self.on_step:
-                    self.data_collector.event_snapshot(event.snapshot())
+                    portfolio_snapshot = self.portfolio._record_portfolio_snapshot()
+                    event_snapshot = event.snapshot()
+                    merged = portfolio_snapshot | event_snapshot
+                    self.data_collector.event_snapshot(merged)
 
         except Exception as e:
             self.logger.error(f"Backtest failed at {self.current_time}: {e}", exc_info=True)

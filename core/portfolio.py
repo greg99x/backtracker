@@ -61,7 +61,8 @@ class Portfolio:
         # Create a snapshot if needed
         if self.enable_snapshots and self.data_collector is not None:
             self.data_collector.portfolio_snapshot(self._record_portfolio_snapshot())
-            self.data_collector.position_snapshot(self._record_positions_snapshot())
+            for snapshot in self._record_positions_snapshot():
+                self.data_collector.position_snapshot(snapshot)
 
 
     def _handle_signal_event(self, event: SignalEvent) -> None:
@@ -115,6 +116,11 @@ class Portfolio:
 
             if self.enable_trade_log:
                 self._update_trade_log(event)
+            # Create a snapshot if needed
+            if self.enable_snapshots and self.data_collector is not None:
+                self.data_collector.portfolio_snapshot(self._record_portfolio_snapshot())
+                for snapshot in self._record_positions_snapshot():
+                    self.data_collector.position_snapshot(snapshot)
 
     def create_new_position(self, symbol):
         '''
@@ -211,3 +217,9 @@ class Portfolio:
             self.cash -= price*quantity
         elif direction == 'SELL':
             self.cash += price*quantity
+    
+    def select_risk_model(self,strategy:str) -> bool:
+        return self.riskmanager.select_riskmodel(strategy)
+    
+    def set_fixed_quantity(self,quantity: float) -> None:
+        self.riskmanager.set_fixed_quantity(quantity)

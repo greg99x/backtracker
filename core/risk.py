@@ -22,7 +22,7 @@ class RiskManager(AbcRiskManager):
         super().__init__(logger)
         self.strategy_list = ['MAX','FIXED']
         self.strategy = 'MAX'
-        self.fixed_amount = 10
+        self.fixed_amount = 10.0
 
     def decide_order_sizing(self,portfolio_snapshot: dict, current_prices: dict,
                              positions: dict, event: SignalEvent) -> float:
@@ -60,3 +60,6 @@ class RiskManager(AbcRiskManager):
         
         self.strategy = strategy
         return True
+    
+    def set_fixed_quantity(self,quantity: float):
+        self.fixed_amount = quantity

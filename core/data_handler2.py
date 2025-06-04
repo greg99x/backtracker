@@ -281,8 +281,6 @@ class YfInterface:
         return df
 
 
-
-
 class DataHandler:
     def __init__(self, eventqueue, logger=None):
         self.eventqueue = eventqueue
@@ -324,6 +322,9 @@ class DataHandler:
             self.logger.info(f'Wrote data with shape: {df.shape}')
             self.logger.info(f'Writer: Last date in data: {df.index.max()}')
 
+    def write_symbol_data(self,symbol: str, data: pd.DataFrame) -> None:
+        self.datastore.write_data(symbol,data)
+        
     def fetch_yf_data(self,symbol: str, start_date: datetime, end_date: datetime, interval='1d',redownload_timedelta=-1) -> None:
         if end_date > datetime.now():
             # end_date can't be in the future
