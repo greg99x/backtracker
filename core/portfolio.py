@@ -4,10 +4,12 @@ import logging
 from core.event import OrderEvent
 from core.position import Position
 from core.event import Event, MarketEvent, OrderEvent, SignalEvent, FillEvent
+from core.risk import RiskManager
 
 class Portfolio:
     def __init__(self, initial_cash, cash_reserve, event_queue, logger=None, data_collector=None):
         self.logger = logger or logging.getLogger(__name__)
+        self.riskmanager = RiskManager(logger=self.logger)
         self.cash = initial_cash
         self.cash_reserve = cash_reserve
         self.event_queue = event_queue
@@ -58,8 +60,8 @@ class Portfolio:
 
         # Create a snapshot if needed
         if self.enable_snapshots and self.data_collector is not None:
-            self._record_portfolio_snapshot()
-            self._record_positions_snapshot()
+            self.data_collector.portfolio_snapshot(self._record_portfolio_snapshot())
+            self.data_collector.position_snapshot(self._record_positions_snapshot())
 
 
     def _handle_signal_event(self, event: SignalEvent) -> None:
@@ -78,6 +80,7 @@ class Portfolio:
         # check if trade should be executed
         quantity = self._decide_order_sizing(event)
         if not quantity:
+            self.logger.info('stuck here')
             return 
 
         timestamp = event.timestamp
@@ -159,22 +162,24 @@ class Portfolio:
     def _position_has_keys(self, symbol):
         return symbol in self.positions
     
-    def _record_portfolio_snapshot(self):
+    def _record_portfolio_snapshot(self) -> dict:
         """ Save a snapshot of the portfolio at a point in time."""
         snapshot = {
             'timestamp': self.timestamp,
             'cash': self.cash,
+            'cash_reserve': self.cash_reserve,
             'equity': self.total_invested_value}
-        
-        self.data_collector.portfolio_snapshot(snapshot)
+        return snapshot
 
     def _record_positions_snapshot(self):
         """ Save a snapshot of the positions at a point in time."""
+        snapshots = []
         for _, pos in self.positions.items():
             snapshot = pos.snapshot()
             #Positions dont keep time, so it has to be added manually to log!
             snapshot['timestamp'] = self.timestamp
-            self.data_collector.position_snapshot(snapshot)
+            snapshots.append(snapshot)
+        return snapshots
 
     def _update_trade_log(self, fill_event):
         self.data_collector.fill_snapshot(fill_event.snapshot())
@@ -183,26 +188,23 @@ class Portfolio:
         self.cash_reserve = self.cash * 0.1
     
     def _decide_order_sizing(self,event):
-        '''
-        This is a dummy sizing strategy.
-        If a BUY signal comes, it will stake the whole available cash
-        If a SELL signal comes, it will close the whole position
-        Returns None if trade should not be executed
-        '''
-        pos = self.positions[event.symbol]
-        if event.signal_type == 'BUY':
-            free_cash = self.cash - self.cash_reserve
-            current_price = self.current_prices[event.symbol]
-            if not current_price or current_price <= 0:
-                self.logger.warning(f'Price for ticker {event.symbol} is invalid')
-                return None
-            return free_cash/current_price
-        
-        elif event.signal_type == 'SELL':
-            return pos.quantity
-        else:
+        if event.signal_type not in ('BUY', 'SELL'):
             self.logger.warning(f'Currently not implemented signal type {event.signal_type}')
             return None
+        
+        current_price = self.current_prices[event.symbol]
+        if not current_price or current_price <= 0:
+            self.logger.warning(f'Price for ticker {event.symbol} is invalid')
+            return None
+        
+        portfolio_snapshot = self._record_portfolio_snapshot()
+        quantity = self.riskmanager.decide_order_sizing(
+            portfolio_snapshot,
+            self.current_prices,
+            self.positions,
+            event)
+
+        return quantity
 
     def _deduct_order_value_from_cash(self,price,quantity,direction):
         if direction == 'BUY':
