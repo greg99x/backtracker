@@ -67,6 +67,7 @@ class TestPortfolio(unittest.TestCase):
         self.portfolio.handle_event(fill)
         reject = self.event_queue.get()
         self.assertEqual(reject.type,'FillDeclined')
+        self.assertGreater(self.portfolio.cash,0)
 
     def test_filleventrejected2(self):
         self.portfolio.logger.info('test_filleventrejected2')
@@ -76,6 +77,7 @@ class TestPortfolio(unittest.TestCase):
         self.portfolio.handle_event(fill)
         reject = self.event_queue.get()
         self.assertEqual(reject.type,'FillDeclined')
+        self.assertGreater(self.portfolio.cash,0)
 
     def test_filleventrejected3(self):
         self.portfolio.logger.info('test_filleventrejected3')
@@ -85,6 +87,8 @@ class TestPortfolio(unittest.TestCase):
         self.portfolio.handle_event(fill)
         reject = self.event_queue.get()
         self.assertEqual(reject.type,'FillDeclined')
+        self.assertGreater(self.portfolio.cash,0)
+
 
     def test_filleventrejected4(self):
         self.portfolio.logger.info('test_filleventrejected4')
@@ -94,6 +98,7 @@ class TestPortfolio(unittest.TestCase):
         self.portfolio.handle_event(fill)
         reject = self.event_queue.get()
         self.assertEqual(reject.type,'FillDeclined')
+        self.assertGreater(self.portfolio.cash,0)
 
     def test_update_market_updates_prices_and_positions(self):
         self.portfolio.logger.info('test_update_market_updates_prices_and_positions')
