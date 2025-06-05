@@ -81,3 +81,14 @@ class FillEvent(Event):
             f"Total Price: {total_price:.2f}, Total Cost: {total_cost:.2f})"
         )
 
+class FillDeclinedEvent(Event):
+    def __init__(self,timestamp, symbol, message):
+        self.type = 'FillDeclined'
+        self.timestamp = timestamp
+        self.symbol = symbol
+        self.message = message
+    
+    def __str__(self):
+        return (
+            f"FillDecliendEvent({self.timestamp}, {self.symbol}: "
+            f"Message: {self.message}")

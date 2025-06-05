@@ -3,5 +3,6 @@
 -Need to write an event where fill is rejected because of insufficient funds.
 -Need to write standardized integration test for datahandler
 -Need to modify at what price the broker handles fills (pick open,close,high,low,more complex logic etc.)
--Need to unify logging for easier debug and preparation for data visualization
 -data visualization modules
+-need to research how the portfolio could emit orders based on rebalancing strategies
+-need to write portfolio metrics (sharp,drawdown,return etc)

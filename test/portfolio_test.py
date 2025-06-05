@@ -59,12 +59,42 @@ class TestPortfolio(unittest.TestCase):
         created = self.portfolio.create_new_position('AAPL')
         self.assertFalse(created)
 
-    '''
-    def test_create_new_position_exists2(self):
-        created = self.portfolio.create_new_position('AAPL')
-        created = self.portfolio.create_new_position('AAPL')
-        self.assertFalse(created)
-    '''
+    def test_filleventrejected(self):
+        self.portfolio.logger.info('test_filleventrejected')
+        self.portfolio.cash = 999
+        self.portfolio.positions['AAPL'] = MockPosition('AAPL')
+        fill = FillEvent(123,'AAPL',1,'BUY',1000,0,0)
+        self.portfolio.handle_event(fill)
+        reject = self.event_queue.get()
+        self.assertEqual(reject.type,'FillDeclined')
+
+    def test_filleventrejected2(self):
+        self.portfolio.logger.info('test_filleventrejected2')
+        self.portfolio.cash = 999
+        self.portfolio.positions['AAPL'] = MockPosition('AAPL')
+        fill = FillEvent(123,'AAPL',1,'BUY',999,10,0)
+        self.portfolio.handle_event(fill)
+        reject = self.event_queue.get()
+        self.assertEqual(reject.type,'FillDeclined')
+
+    def test_filleventrejected3(self):
+        self.portfolio.logger.info('test_filleventrejected3')
+        self.portfolio.cash = 999
+        self.portfolio.positions['AAPL'] = MockPosition('AAPL')
+        fill = FillEvent(123,'AAPL',1,'BUY',999,0,10)
+        self.portfolio.handle_event(fill)
+        reject = self.event_queue.get()
+        self.assertEqual(reject.type,'FillDeclined')
+
+    def test_filleventrejected4(self):
+        self.portfolio.logger.info('test_filleventrejected4')
+        self.portfolio.cash = 999
+        self.portfolio.positions['AAPL'] = MockPosition('AAPL')
+        fill = FillEvent(123,'AAPL',1,'BUY',999,5,5)
+        self.portfolio.handle_event(fill)
+        reject = self.event_queue.get()
+        self.assertEqual(reject.type,'FillDeclined')
+
     def test_update_market_updates_prices_and_positions(self):
         self.portfolio.logger.info('test_update_market_updates_prices_and_positions')
         self.portfolio.positions['AAPL'] = MockPosition('AAPL')
@@ -81,7 +111,6 @@ class TestPortfolio(unittest.TestCase):
         self.portfolio.current_prices['AAPL'] = 100
         self.portfolio.cash = 10000
         self.portfolio.cash_reserve = 0
-        
         event = SignalEvent(symbol='AAPL', timestamp=123, signal_type='BUY')
         self.portfolio.handle_event(event)
         

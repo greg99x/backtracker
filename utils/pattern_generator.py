@@ -34,7 +34,7 @@ class PatternGenerator:
             stocksplit = np.full(n, np.nan)
 
         # Generate date range
-        dates = pd.date_range(start=datetime.datetime(2024, 1, 1), periods=n, freq='D')
+        dates = pd.date_range(start=datetime.datetime(1950, 1, 1), periods=n, freq='D')
 
         # Assemble into DataFrame
         df = pd.DataFrame({

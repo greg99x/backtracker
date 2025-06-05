@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import logging
 from core.event import OrderEvent
 from core.position import Position
-from core.event import Event, MarketEvent, OrderEvent, SignalEvent, FillEvent
+from core.event import Event, MarketEvent, OrderEvent, SignalEvent, FillEvent, FillDeclinedEvent
 from core.risk import RiskManager
 
 class Portfolio:
@@ -101,26 +101,53 @@ class Portfolio:
         
         # Check if position exists
         if not self._position_has_keys(symbol):
-            self.logger.warning(f'Order filled for non existing position: {symbol}')
+            self.logger.error(f'Order filled for non existing position: {symbol}')
             return None
         
         # Let the position proccess the fill event
         fill_ok = self.positions[symbol].update_fill(event)
-        if fill_ok:
-            self._deduct_order_value_from_cash(event.fill_price, event.quantity, event.direction)
-            self._deduct_fee_from_cash(event.commission)
-            self._deduct_fee_from_cash(event.slippage)
-            self._update_total_market_value()
-            self._update_cumulated_commission(event)
-            self._update_cumulated_slippage(event)
 
-            if self.enable_trade_log:
-                self._update_trade_log(event)
-            # Create a snapshot if needed
-            if self.enable_snapshots and self.data_collector is not None:
-                self.data_collector.portfolio_snapshot(self._record_portfolio_snapshot())
-                for snapshot in self._record_positions_snapshot():
-                    self.data_collector.position_snapshot(snapshot)
+        if not fill_ok:
+            return None
+        
+        if event.commission < 0 or event.slippage < 0:
+            self.logger.warning('Fee amount can not be less then zero.')
+            return None
+        
+        check = self._deduct_order_value_from_cash(event.fill_price, event.quantity, event.direction)
+        if not check:
+            reject_event = FillDeclinedEvent(event.timestamp,event.symbol,
+                                                'Balance less then fill amount.')
+            self.event_queue.put(reject_event)
+            return None
+        
+        check = self._deduct_fee_from_cash(event.commission)
+
+        if not check:
+            reject_event = FillDeclinedEvent(event.timestamp,event.symbol,
+                                                'Balance less then fee amount.')
+            self.event_queue.put(reject_event)
+            return None
+        
+        check = self._deduct_fee_from_cash(event.slippage)
+        
+        if not check:
+            reject_event = FillDeclinedEvent(event.timestamp,event.symbol,
+                                                'Balance less then fee amount.')
+            self.event_queue.put(reject_event)
+            return None
+        
+        self._update_total_market_value()
+        self._update_cumulated_commission(event)
+        self._update_cumulated_slippage(event)
+
+        if self.enable_trade_log:
+            self._update_trade_log(event)
+        # Create a snapshot if needed
+        if self.enable_snapshots and self.data_collector is not None:
+            self.data_collector.portfolio_snapshot(self._record_portfolio_snapshot())
+            for snapshot in self._record_positions_snapshot():
+                self.data_collector.position_snapshot(snapshot)
 
     def create_new_position(self, symbol):
         '''
@@ -157,14 +184,13 @@ class Portfolio:
             return
         self.cumulated_commission += event.commission
     
-    def _deduct_fee_from_cash(self,amount):
-        if amount < 0:
-            self.logger.warning('Fee amount can not be less then zero.')
-            return
-        self.cash -= amount
-        if self.cash < 0:
-            self.logger.warning('Cash is negative after fee deduction')
-
+    def _deduct_fee_from_cash(self,amount) -> bool:
+        if self.cash > amount:
+            self.cash -= amount
+            return True
+        else:
+            return False
+        
     def _position_has_keys(self, symbol):
         return symbol in self.positions
     
@@ -212,11 +238,16 @@ class Portfolio:
 
         return quantity
 
-    def _deduct_order_value_from_cash(self,price,quantity,direction):
+    def _deduct_order_value_from_cash(self,price,quantity,direction) -> bool:
         if direction == 'BUY':
-            self.cash -= price*quantity
+            if self.cash > price*quantity:
+                self.cash -= price*quantity
+                return True
+            else:
+                return False
         elif direction == 'SELL':
             self.cash += price*quantity
+            return True
     
     def select_risk_model(self,strategy:str) -> bool:
         return self.riskmanager.select_riskmodel(strategy)
