@@ -18,6 +18,7 @@ from core.position import Position
 from core.strategy import FixedPriceStrategy
 from core.core import EventQueue
 from core.metrics import DataCollector
+from core.market_context import MarketContext
 from utils.pattern_generator import PatternGenerator
 
 # --- Logger Setup ---
@@ -81,6 +82,8 @@ class TestCore(unittest.TestCase):
         
         self.market_calendar.is_market_open.side_effect = mock_is_market_open
 
+        self.price_source = MarketContext()
+
         self.event_queue = EventQueue(logger=logger)
 
         self.data_collector = DataCollector()
@@ -88,13 +91,13 @@ class TestCore(unittest.TestCase):
         self.strategy = FixedPriceStrategy(self.event_queue,'A',buy_price=self.buy_price,
                                            sell_price=self.sell_price,logger=logger)
 
-        self.portfolio = Portfolio(initial_cash=self.cash,cash_reserve=self.cash_reserve,
+        self.portfolio = Portfolio(initial_cash=self.cash,price_source=self.price_source,cash_reserve=self.cash_reserve,
                                    event_queue=self.event_queue,logger=logger,data_collector=self.data_collector)
 
         self.datahandler = DataHandler(self.event_queue,logger=logger)
 
         self.broker = Broker(event_queue=self.event_queue,
-                             price_source=self.datahandler,
+                             price_source=self.price_source,
                              market_calendar=self.market_calendar,
                              commission_perc=0.0,
                              slippage_perc=0.0,
@@ -105,7 +108,9 @@ class TestCore(unittest.TestCase):
                                      strategy=self.strategy,
                                      broker=self.broker,
                                      portfolio=self.portfolio,
-                                     logger=logger, data_collector=self.data_collector)
+                                     logger=logger, 
+                                     market_context=self.price_source,
+                                     data_collector=self.data_collector)
 
     
     def test_run_no_fees(self):
@@ -133,6 +138,14 @@ class TestCore(unittest.TestCase):
         self.broker.slippage_perc = 0.0
         self.engine.run_backtest()
         closing_cash = self.portfolio.cash
+        log1 = pd.DataFrame(self.data_collector.portfolio_log)
+        log2 = pd.DataFrame(self.data_collector.fill_log)
+        log3 = pd.DataFrame(self.data_collector.event_log)
+        log4 = pd.DataFrame(self.data_collector.position_log)
+        log1.to_csv('portfoliolog.csv')
+        log2.to_csv('filllog.csv')
+        log3.to_csv('eventlog.csv')
+        log4.to_csv('positionlog.csv')
         logger.info(f'Theoretical gains: {gain}')
         logger.info(f'Realized gains: {closing_cash-starting_cash}')
         self.assertAlmostEqual(closing_cash-starting_cash,gain)

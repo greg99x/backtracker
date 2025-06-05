@@ -7,6 +7,7 @@ import sys
 import logging
 import yfinance as yf
 from time import time
+import cProfile
 
 # --- Add parent directory to path for importing DataStore ---
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -36,11 +37,11 @@ stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
 logger.propagate = False  # Don't bubble up to root logger
 
-class TestCore(unittest.TestCase):
+class SpeedTest:
     '''
     -----------------------------------------------------------------------------------------
-    | This unit is working with a syntethic fixed pattern, to validate engine core operation.
-    | Date: 04.06.2025.
+    | This unit is working with a syntethic fixed pattern, to check engine core speed.
+    | Date: 05.06.2025.
     | In this test, price1 and price2 are defined where:
     | price1_open = price1_close
     | price2_open = price2_close
@@ -50,7 +51,7 @@ class TestCore(unittest.TestCase):
     -----------------------------------------------------------------------------------------
     '''
 
-    def setUp(self):
+    def __init__(self):
         # Open==Close=10
         self.open1 = 10
         self.high1 = 11
@@ -61,13 +62,16 @@ class TestCore(unittest.TestCase):
         self.high2 = 6
         self.low2 = 5
         self.close2 = 5
-        self.days = 100000 # ~270year of daily data
+        self.days = 10000 # ~270year of daily data
         #Buy on day2 sell on day3
         self.buy_price = 6
         self.sell_price = 9
         #Portfolio setup
         self.cash = 10000
         self.cash_reserve = 1000
+        self.starting_cash = 0
+        self.closing_cash = 0
+        self.gain = 0
 
         self.pattern_generator = PatternGenerator()
         self.pattern = self.pattern_generator.fixed_oscillating(
@@ -111,7 +115,7 @@ class TestCore(unittest.TestCase):
         self.portfolio.enable_trade_log = False
         self.engine.on_step = False
     
-    def test_run_with_fees(self):
+    def setup_run(self):
         '''
         Test that calculated cash matches theoretical value
         Price of asset 'A' oscillates between OHLCV1 and OHLCV2 every day
@@ -121,7 +125,6 @@ class TestCore(unittest.TestCase):
         self.broker.commission_perc = 0.005
         self.broker.slippage_perc = 0.005
 
-        self.assertEqual(self.days%2,0) # Check that trades can be closed, by checking days even
         # Fixed quantity that will be bought every trade
         buy_quantity = 10.0 
         # Spread that can be made with fixed price strategy in one buy-sell
@@ -129,20 +132,24 @@ class TestCore(unittest.TestCase):
         buy_side_fees = self.close2 * (self.broker.commission_perc + self.broker.slippage_perc)
         sell_side_fees = self.close1 * (self.broker.commission_perc + self.broker.slippage_perc)
         rounds = self.days // 2
-        gain = (spread-sell_side_fees-buy_side_fees)*rounds*buy_quantity
+        self.gain = (spread-sell_side_fees-buy_side_fees)*rounds*buy_quantity
 
-        starting_cash = self.portfolio.cash
+        self.starting_cash = self.portfolio.cash
         self.datahandler.write_symbol_data('A',self.pattern)
         self.datahandler.create_event_queue_lazy()
         self.portfolio.create_new_position('A')
         self.portfolio.select_risk_model('FIXED')
         self.portfolio.set_fixed_quantity(buy_quantity)
 
+
+    def run_engine(self):
         self.engine.run_backtest()
-        closing_cash = self.portfolio.cash
-        logger.info(f'Theoretical gains: {gain}')
-        logger.info(f'Realized gains: {closing_cash-starting_cash}')
-        self.assertAlmostEqual(closing_cash-starting_cash,gain)
+        self.closing_cash = self.portfolio.cash
+        logger.info(f'Theoretical gains: {self.gain}')
+        logger.info(f'Realized gains: {self.closing_cash-self.starting_cash}')
 
 if __name__ == '__main__':
-    unittest.main()
+    test = SpeedTest()
+    test.setup_run()
+    cProfile.run('test.run_engine()', filename='profile.prof')
+

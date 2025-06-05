@@ -11,7 +11,7 @@ class Broker:
         Simulated broker to ecute orders.
 
         :param event_queue: Queue to send FillEvents back to
-        :param price_source: Object with a `get__price(symbol,time)` method
+        :param price_source: Object with a `price(symbol)` method
         :param commission_perc: Proportional commission (e.g. 0.001 = 0.1%)
         :param slippage_perc: Proportional slippage (e.g. 0.0005 = 0.05%)
         :param market_calendar: object that can check if market is open at a given time
@@ -90,7 +90,7 @@ class Broker:
         timestamp = current_time
 
         # Get current market price
-        price = self.price_source.get_price(symbol, current_time)
+        price = self.price_source.price(symbol)
         try:
             price = float(price)
         except Exception as e:

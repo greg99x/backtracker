@@ -7,6 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.broker import Broker
 from core.core import EventQueue
 from core.event import OrderEvent
+from core.market_context import MarketContext
 import logging
 
 # Setup logger to print to console
@@ -21,8 +22,9 @@ logger.addHandler(console_handler)
 class TestBroker(unittest.TestCase):
     def setUp(self):
         self.event_queue = EventQueue()
-        self.price_source = Mock()
         self.market_calendar = Mock()
+        self.price_source = MarketContext()
+        self.price_source.price = MagicMock()
 
         self.broker = Broker(
             event_queue=self.event_queue,
@@ -54,34 +56,34 @@ class TestBroker(unittest.TestCase):
     def test_order_price(self):
         self.broker.logger.info('test_order_price')
         self.market_calendar.is_market_open.return_value = True
-        self.price_source.get_price.return_value = -0.001
+        self.price_source.price.return_value = -0.001
         self.broker.handle_event(self.order_event)
         self.assertEqual(self.broker.event_queue.size(),0)
 
-        self.price_source.get_price.return_value = 0
+        self.price_source.price.return_value = 0
         self.broker.handle_event(self.order_event)
         self.assertEqual(self.broker.event_queue.size(),0)
 
-        self.price_source.get_price.return_value = None
+        self.price_source.price.return_value = None
         self.broker.handle_event(self.order_event)
         self.assertEqual(self.broker.event_queue.size(),0)
 
-        self.price_source.get_price.return_value = 'price'
+        self.price_source.price.return_value = 'price'
         self.broker.handle_event(self.order_event)
         self.assertEqual(self.broker.event_queue.size(),0)
 
-        self.price_source.get_price.return_value = int(10)
+        self.price_source.price.return_value = int(10)
         self.broker.handle_event(self.order_event)
         self.assertEqual(self.broker.event_queue.size(),1)
 
-        self.price_source.get_price.return_value = float(10)
+        self.price_source.price.return_value = float(10)
         self.broker.handle_event(self.order_event)
         self.assertEqual(self.broker.event_queue.size(),2)
 
 
     def test_order_direction(self):
         self.broker.logger.info('test_order_direction')
-        self.price_source.get_price.return_value = 10
+        self.price_source.price.return_value = 10
         self.market_calendar.is_market_open.return_value = True
         self.order_event.direction = 'LONG'
         self.broker.handle_event(self.order_event)
@@ -98,7 +100,7 @@ class TestBroker(unittest.TestCase):
 
     def test_order_type(self):
         self.broker.logger.info('test_order_type')
-        self.price_source.get_price.return_value = 10
+        self.price_source.price.return_value = 10
         self.market_calendar.is_market_open.return_value = True
 
         self.order_event.order_type = 'LIMIT'
@@ -110,7 +112,7 @@ class TestBroker(unittest.TestCase):
 
     def test_order_quantity(self):
         self.broker.logger.info('test_order_quantity')
-        self.price_source.get_price.return_value = 10
+        self.price_source.price.return_value = 10
         self.market_calendar.is_market_open.return_value = True
         self.order_event.quantity = -1    
         self.broker.handle_event(self.order_event)
@@ -138,7 +140,7 @@ class TestBroker(unittest.TestCase):
         self.event_queue.put = MagicMock()
 
         self.market_calendar.is_market_open.return_value = True
-        self.price_source.get_price.return_value = 100.0
+        self.price_source.price.return_value = 100.0
 
         self.broker.handle_event(self.order_event)
 
@@ -181,7 +183,7 @@ class TestBroker(unittest.TestCase):
 
         # Now simulate market open
         self.market_calendar.is_market_open.return_value = True
-        self.price_source.get_price.return_value = 200.0
+        self.price_source.price.return_value = 200.0
         market_event = Mock()
         market_event.type = 'MARKET'
         market_event.timestamp = self.order_event.timestamp

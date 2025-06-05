@@ -7,17 +7,16 @@ from core.event import Event, MarketEvent, OrderEvent, SignalEvent, FillEvent, F
 from core.risk import RiskManager
 
 class Portfolio:
-    def __init__(self, initial_cash, cash_reserve, event_queue, logger=None, data_collector=None):
+    def __init__(self, initial_cash, price_source, cash_reserve, event_queue, logger=None, data_collector=None):
         self.logger = logger or logging.getLogger(__name__)
-        self.riskmanager = RiskManager(logger=self.logger)
+        self.riskmanager = RiskManager(price_source,logger=self.logger)
         self.cash = initial_cash
         self.cash_reserve = cash_reserve
         self.event_queue = event_queue
         self.data_collector = data_collector
+        self.price_source = price_source
         self.positions = {} #holder for instances of Position class
-        self.current_prices = {}    # symbol -> latest price
         self.total_invested_value = 0.0
-        self.timestamp = None # Last timestamp from event, not guaranteed to be up to date, handle with care!
         self.enable_snapshots = True
         self.enable_trade_log = True
         self.cumulated_slippage = 0.0
@@ -45,16 +44,6 @@ class Portfolio:
         if event.type != 'MARKET' or not self._position_has_keys(event.symbol):
             return
             
-        symbol = event.symbol
-        price = event.price
-        self.timestamp = event.timestamp
-
-        # Store latest price
-        self.current_prices[symbol] = price
-
-        # Update position based on new event
-        #self.positions[symbol].update_position(event)
-
         # Update total market value
         self._update_total_market_value()
 
@@ -81,7 +70,6 @@ class Portfolio:
         # check if trade should be executed
         quantity = self._decide_order_sizing(event)
         if not quantity:
-            self.logger.info('stuck here')
             return 
 
         timestamp = event.timestamp
@@ -122,7 +110,6 @@ class Portfolio:
             return None
         
         check = self._deduct_fee_from_cash(event.commission)
-
         if not check:
             reject_event = FillDeclinedEvent(event.timestamp,event.symbol,
                                                 'Balance less then fee amount.')
@@ -130,7 +117,6 @@ class Portfolio:
             return None
         
         check = self._deduct_fee_from_cash(event.slippage)
-        
         if not check:
             reject_event = FillDeclinedEvent(event.timestamp,event.symbol,
                                                 'Balance less then fee amount.')
@@ -167,10 +153,10 @@ class Portfolio:
     def _update_total_market_value(self):
         # Recalculate total market value
         self.total_invested_value = sum(
-            pos.market_value(self.current_prices[sym])
+            pos.market_value(self.price_source.price(sym))
             for sym, pos in self.positions.items()
-            if sym in self.current_prices
-        )
+            if self.price_source.price(sym) is not None
+        ) #---------------------------------------------------check----------------------------------------------
 
     def _update_cumulated_slippage(self,event):
         if not event.type == 'FILL':
@@ -197,7 +183,7 @@ class Portfolio:
     def _record_portfolio_snapshot(self) -> dict:
         """ Save a snapshot of the portfolio at a point in time."""
         snapshot = {
-            'timestamp': self.timestamp,
+            'timestamp': self.price_source.time(),
             'cash': self.cash,
             'cash_reserve': self.cash_reserve,
             'equity': self.total_invested_value}
@@ -209,7 +195,7 @@ class Portfolio:
         for _, pos in self.positions.items():
             snapshot = pos.snapshot()
             #Positions dont keep time, so it has to be added manually to log!
-            snapshot['timestamp'] = self.timestamp
+            snapshot['timestamp'] = self.price_source.time()
             snapshots.append(snapshot)
         return snapshots
 
@@ -224,15 +210,14 @@ class Portfolio:
             self.logger.warning(f'Currently not implemented signal type {event.signal_type}')
             return None
         
-        current_price = self.current_prices[event.symbol]
+        current_price = self.price_source.price(event.symbol)
         if not current_price or current_price <= 0:
-            self.logger.warning(f'Price for ticker {event.symbol} is invalid')
+            self.logger.warning(f'Price for ticker {event.symbol}:{current_price} is invalid')
             return None
         
         portfolio_snapshot = self._record_portfolio_snapshot()
         quantity = self.riskmanager.decide_order_sizing(
             portfolio_snapshot,
-            self.current_prices,
             self.positions,
             event)
 

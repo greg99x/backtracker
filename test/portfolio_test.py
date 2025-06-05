@@ -9,6 +9,7 @@ from collections import namedtuple
 from core.core import EventQueue
 from core.event import Event, MarketEvent, OrderEvent, SignalEvent, FillEvent
 from core.metrics import DataCollector
+from core.market_context import MarketContext
 
 # Setup logger to print to console
 logger = logging.getLogger('logger')
@@ -36,13 +37,18 @@ class MockPosition:
 class TestPortfolio(unittest.TestCase):
     def setUp(self):
         self.event_queue = EventQueue() # This is only valid as long as the queue is really only a queue!
+        self.price_source = MagicMock()
+        self.price_source.price = MarketContext()
+        self.price_source.price = MagicMock()
         self.data_collector = DataCollector()
-        self.portfolio = Portfolio(initial_cash=10000, cash_reserve=1000,
+        self.portfolio = Portfolio(initial_cash=10000, price_source=self.price_source,
+                                   cash_reserve=1000,
                                     event_queue=self.event_queue,logger=logger,
                                     data_collector=self.data_collector)
         
         # Patch Position class inside Portfolio to use our MockPosition
         patcher = patch('core.portfolio.Position', MockPosition)
+        self.price_source.price.return_value = 10
         self.addCleanup(patcher.stop)
         self.mock_position_class = patcher.start()
 
@@ -106,14 +112,11 @@ class TestPortfolio(unittest.TestCase):
         event = MarketEvent(symbol='AAPL', open=150, timestamp=123456789)
         
         self.portfolio.handle_event(event)
-        self.assertEqual(self.portfolio.current_prices['AAPL'], 150)
         self.assertGreaterEqual(self.portfolio.total_invested_value, 0)
-        self.assertEqual(self.portfolio.timestamp, 123456789)
 
     def test_generate_order_puts_order_event_in_queue(self):
         self.portfolio.logger.info('test_generate_order_puts_order_event_in_queue')
         self.portfolio.positions['AAPL'] = MockPosition('AAPL')
-        self.portfolio.current_prices['AAPL'] = 100
         self.portfolio.cash = 10000
         self.portfolio.cash_reserve = 0
         event = SignalEvent(symbol='AAPL', timestamp=123, signal_type='BUY')

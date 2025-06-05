@@ -1,6 +1,5 @@
-
+-need to write in core to aggregate orders that have the same timestamp to prevent partial state
 -Need to decide if broker should ask for price update in separate event?
--Need to write an event where fill is rejected because of insufficient funds.
 -Need to write standardized integration test for datahandler
 -Need to modify at what price the broker handles fills (pick open,close,high,low,more complex logic etc.)
 -data visualization modules

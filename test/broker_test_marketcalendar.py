@@ -6,6 +6,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.broker import Broker
 from core.core import EventQueue
+from core.market_context import MarketContext
 from core.event import OrderEvent
 import logging
 
@@ -21,7 +22,8 @@ logger.addHandler(console_handler)
 class TestBroker(unittest.TestCase):
     def setUp(self):
         self.event_queue = EventQueue()
-        self.price_source = Mock()
+        self.price_source = MarketContext()
+        self.price_source.price = MagicMock()
         self.market_calendar = Mock()
         self.event_queue.put = MagicMock()
 
@@ -69,7 +71,7 @@ class TestBroker(unittest.TestCase):
         #set time before market open
         self.order_event.timestamp = datetime(2024, 1, 1, 8, 0)
         self.order_event2.timestamp = datetime(2024, 1, 1, 8, 0)
-        self.price_source.get_price.return_value = 1.0
+        self.price_source.price.return_value = 1.0
 
         #push 2 orders with different market opens
         self.broker.handle_event(self.order_event)
@@ -80,7 +82,7 @@ class TestBroker(unittest.TestCase):
     
     def test_two_orders_with_only_one_open_market(self):
         self.broker.logger.info('test_two_orders_with_only_one_open_market')
-        self.price_source.get_price.return_value = 1.0
+        self.price_source.price.return_value = 1.0
         self.order_event.timestamp = datetime(2024, 1, 1, 8, 0) # just for clarity
         self.order_event2.timestamp = datetime(2024, 1, 1, 8, 0) # just for clarity
 

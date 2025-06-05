@@ -18,6 +18,7 @@ from core.position import Position
 from core.strategy import FixedPriceStrategy
 from core.core import EventQueue
 from core.metrics import DataCollector
+from core.market_context import MarketContext
 
 # --- Logger Setup ---
 logger = logging.getLogger('logger')
@@ -47,16 +48,20 @@ class TestCore(unittest.TestCase):
 
         self.event_queue = EventQueue(logger=logger)
 
+        self.price_source = MarketContext()
+
         self.data_collector = DataCollector()
 
         self.strategy = FixedPriceStrategy(self.event_queue,'BTC-USD',buy_price=30000.0,sell_price=45000.0,logger=logger)
 
-        self.portfolio = Portfolio(initial_cash=11000.0,cash_reserve=1000.0,event_queue=self.event_queue,logger=logger,data_collector=self.data_collector)
+        self.portfolio = Portfolio(initial_cash=11000.0,price_source=self.price_source,
+                                   cash_reserve=1000.0,event_queue=self.event_queue,logger=logger,
+                                   data_collector=self.data_collector)
 
         self.datahandler = DataHandler(self.event_queue,logger=logger)
 
         self.broker = Broker(event_queue=self.event_queue,
-                             price_source=self.datahandler,
+                             price_source=self.price_source,
                              market_calendar=self.market_calendar,
                              commission_perc=0.003,
                              slippage_perc=0.001,
@@ -67,7 +72,9 @@ class TestCore(unittest.TestCase):
                                      strategy=self.strategy,
                                      broker=self.broker,
                                      portfolio=self.portfolio,
-                                     logger=logger, data_collector=self.data_collector)
+                                     logger=logger, 
+                                     market_context=self.price_source,
+                                     data_collector=self.data_collector)
 
     
     def test_run_engine(self):
